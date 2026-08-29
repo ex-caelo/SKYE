@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skye.app/schemas/form.config.overlay.schema.json",
+  "title": "SKYE Form Config Overlay",
+  "description": "Validates a permission-overlay form.config.json (skye_data/forms/[id]/[permission]/form.config.json). Structurally identical to the base form.config.schema.json except NOTHING is required at the top level \u2014 an overlay only needs to declare the pages/fields/postActions it's adding or loosening, per the additive-only merge convention documented in the base schema and README. Nested objects (a page, a field, a postAction) still require their own normal required keys when present \u2014 e.g. a field you do mention must still have controlType \u2014 matching how the two real overlay examples in this repo are authored (full field redeclarations, not single-key patches), which keeps overlay files easy for a non-coder to read top to bottom rather than needing to diff against the base file mentally.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "title": { "type": "string" },
+    "description": { "type": "string" },
+    "mode": { "enum": ["create", "edit", "both"] },
+    "list": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "siteId": { "type": "string" }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gridTemplateColumns": { "$ref": "form.config.schema.json#/$defs/trackSizing" },
+        "gap": { "type": "string" }
+      }
+    },
+    "pages": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$" },
+      "additionalProperties": { "$ref": "form.config.schema.json#/$defs/page" }
+    },
+    "fields": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$" },
+      "additionalProperties": { "$ref": "form.config.schema.json#/$defs/field" }
+    },
+    "postActions": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$" },
+      "additionalProperties": { "$ref": "form.config.schema.json#/$defs/postAction" }
+    }
+  }
+}

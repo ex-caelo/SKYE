@@ -1,0 +1,502 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skye.app/schemas/form.config.schema.json",
+  "title": "SKYE Form Config",
+  "description": "Defines a SKYE form as a partial override/patch layered on top of a live SharePoint list + list-columns Graph response. The form id itself comes from a query/hash param in the URL at render time, not from this file. Files at skye_data/forms/[id]/form.config.json are the base config for all users; files at skye_data/forms/[id]/[permission]/form.config.json are merged on top for users in that permission level. Overlays are ADDITIVE ONLY: a higher permission level may add new pages, fields, table columns, or post-actions, and may loosen existing constraints (e.g. readonly: true -> false, raising a maxlength), but must never remove or hide something a lower permission level can already see, and should not introduce a stricter constraint than the base config already has. Merge algorithm is JSON Merge Patch (RFC 7396) applied per object key; because overlays are additive-only, the 'null deletes a key' behaviour of RFC 7396 is intentionally unused/disallowed by convention in this system. Wherever a property has a direct HTML attribute or CSS property equivalent, this schema uses that literal name and value shape, so authoring a field/layout reads like writing plain HTML/CSS.",
+  "type": "object",
+  "required": ["list", "pages", "fields"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Optional self-reference, should match the [id] folder name. The form actually shown at runtime is selected by a ? or # param in the URL, not by this field."
+    },
+    "title": { "type": "string", "description": "Overall form title." },
+    "description": { "type": "string", "description": "Optional intro copy shown below the title, above the pages." },
+    "mode": {
+      "enum": ["create", "edit", "both"],
+      "default": "both",
+      "description": "Whether this config applies when creating a new list item, editing an existing one, or both. Editing is signalled at runtime by an itemId being present."
+    },
+    "list": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "SharePoint list GUID this form's primary fields read/write." },
+        "siteId": { "type": "string", "description": "Optional explicit siteId override; normally resolved from the URL's ?siteId= param." }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Form-wide grid defaults, using literal CSS Grid property names so authoring maps 1:1 onto real grid-template-columns/gap. Individual pages can override either; every page defines its own gridTemplateAreas.",
+      "properties": {
+        "gridTemplateColumns": {
+          "$ref": "#/$defs/trackSizing",
+          "default": 12,
+          "description": "Every gridTemplateAreas row on a page must have exactly as many space-separated tokens as this defines columns."
+        },
+        "gap": { "type": "string", "default": "1rem" }
+      }
+    },
+    "pages": {
+      "type": "object",
+      "description": "Every form has at least one page (even single-page forms — just declare one). Keying by page key, rather than an array, lets a permission overlay add a whole new page without restating the others.",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/page" }
+    },
+    "fields": {
+      "type": "object",
+      "description": "Flat dictionary of ALL form fields across ALL pages, keyed by an author-chosen field key (camelCase recommended). Each field declares which page it belongs to via `page`. Keying by object (not array) is what lets permission overlays cleanly add fields via JSON Merge Patch without restating unrelated fields.",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/field" }
+    },
+    "postActions": {
+      "type": "object",
+      "description": "Actions to run around form submission, keyed by an author-chosen action key (same additive-merge rationale as `fields`).",
+      "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/postAction" }
+    }
+  },
+  "$defs": {
+
+    "trackSizing": {
+      "description": "Grid track sizing. Either an integer (shorthand for N equal-width tracks, i.e. CSS `repeat(N, 1fr)`) or a raw CSS track-list string exactly as you'd write it in a stylesheet, e.g. \"2fr 1fr\" for a 2/3 + 1/3 split, or \"240px 1fr\" for a fixed sidebar plus a flexible column.",
+      "oneOf": [
+        { "type": "integer", "minimum": 1 },
+        { "type": "string" }
+      ]
+    },
+
+    "htmlAttributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A reviewed allowlist of extra native HTML attributes to spread onto the rendered element, for anything the structured field properties don't already cover (step, autocomplete, inputmode, etc). This is an allowlist, not a blocklist: event-handler attributes (onclick, onerror, ...) and URL-bearing attributes (href, src, formaction, ...) are intentionally not included here, so a config can never inject executable script or a javascript:/data: URL through this bag. New attributes should be added deliberately, one at a time, not opened up wholesale. Renderers must additionally strip any key matching /^on/i at render time regardless of this list, as defense in depth against a config that reaches the renderer without schema validation.",
+      "properties": {
+        "placeholder": { "type": "string" },
+        "autocomplete": { "type": "string" },
+        "inputmode": { "enum": ["none", "text", "decimal", "numeric", "tel", "search", "email", "url"] },
+        "spellcheck": { "type": "boolean" },
+        "step": { "type": ["number", "string"] },
+        "accept": { "type": "string", "description": "For controlType 'file', restricts pickable file types, e.g. 'image/*'." },
+        "multiple": { "type": "boolean" },
+        "list": { "type": "string", "description": "Associates a <datalist> id for free-text autocomplete suggestions." },
+        "rows": { "type": "integer", "description": "Textarea visible row count." },
+        "cols": { "type": "integer" },
+        "wrap": { "enum": ["hard", "soft"] },
+        "size": { "type": "integer" },
+        "title": { "type": "string", "description": "Native tooltip text." },
+        "autofocus": { "type": "boolean" },
+        "disabled": { "type": "boolean" }
+      },
+      "patternProperties": {
+        "^(data|aria)-[a-z0-9-]+$": { "type": ["string", "number", "boolean"] }
+      }
+    },
+
+    "cssStyle": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A reviewed allowlist of extra cosmetic CSS properties, camelCase keys (same convention as a React style object / element.style, and as layout.gridTemplateColumns above). Layout-structural properties (gridArea, gridColumn, gridRow, position, display, zIndex) are intentionally excluded so a single field can't override the page's grid placement or escape normal document flow \u2014 use the page's gridTemplateAreas for placement instead. backgroundImage is excluded too, to close off its use as a low-grade tracking/exfiltration channel (a url(...) value fires a network request on render).",
+      "properties": {
+        "color": { "type": "string" },
+        "backgroundColor": { "type": "string" },
+        "fontSize": { "type": "string" },
+        "fontWeight": { "type": ["string", "number"] },
+        "fontStyle": { "type": "string" },
+        "textAlign": { "enum": ["left", "right", "center", "justify"] },
+        "textTransform": { "type": "string" },
+        "lineHeight": { "type": ["string", "number"] },
+        "border": { "type": "string" },
+        "borderRadius": { "type": "string" },
+        "padding": { "type": "string" },
+        "margin": { "type": "string" },
+        "width": { "type": "string" },
+        "height": { "type": "string" },
+        "maxWidth": { "type": "string" },
+        "minWidth": { "type": "string" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+
+    "page": {
+      "type": "object",
+      "required": ["title"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "description": "Tab/step label." },
+        "order": { "type": "integer", "description": "Left-to-right tab order / step order. Pages without an explicit order sort after those with one, in key order." },
+        "visibleIf": {
+          "$ref": "#/$defs/condition",
+          "description": "If present, this whole page (its tab/step) is hidden unless the condition is met. Conditions should only reference fields on earlier pages to avoid forward-dependency cycles."
+        },
+        "layout": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "gridTemplateColumns": { "$ref": "#/$defs/trackSizing", "description": "Overrides the form-wide layout.gridTemplateColumns for this page only." },
+            "gap": { "type": "string", "description": "Overrides the form-wide layout.gap for this page only." },
+            "gridTemplateRows": {
+              "$ref": "#/$defs/trackSizing",
+              "description": "Optional explicit CSS grid-template-rows sizing, e.g. \"auto 200px auto\" to make one row taller than the rest \u2014 useful for a rich-text or lookupTable field that needs more vertical room. If omitted, rows auto-size to their tallest field's content, which already covers most row-spanning cases (a field spanning two gridTemplateAreas rows just gets the combined height of both)."
+            },
+            "gridTemplateAreas": {
+              "type": "array",
+              "description": "Rows of a literal CSS grid-template-areas layout for this page. Each string is a row; each space-separated token is a field key (must be a field in the top-level `fields` dict with `page` set to this page) occupying that cell. Every row must have the same number of tokens as gridTemplateColumns. Repeat a key across adjacent cells in the same row to span it horizontally; repeat a key at the same cell position across multiple row-strings to span it vertically. Use '.' for an empty cell.",
+              "items": { "type": "string", "pattern": "^[a-zA-Z0-9_. ]+$" },
+              "minItems": 1
+            }
+          }
+        }
+      }
+    },
+
+    "condition": {
+      "description": "A structured, non-code way to express branching logic, evaluated against currently-entered field values. Combine with all/any/not; leaf nodes check one field against one operator.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "maxProperties": 1,
+          "properties": {
+            "all": { "type": "array", "items": { "$ref": "#/$defs/condition" }, "minItems": 1, "description": "True only if every sub-condition is true." },
+            "any": { "type": "array", "items": { "$ref": "#/$defs/condition" }, "minItems": 1, "description": "True if at least one sub-condition is true." },
+            "not": { "$ref": "#/$defs/condition", "description": "True if the sub-condition is false." }
+          }
+        },
+        { "$ref": "#/$defs/conditionRule" }
+      ]
+    },
+    "conditionRule": {
+      "type": "object",
+      "required": ["field", "operator"],
+      "additionalProperties": false,
+      "properties": {
+        "field": { "type": "string", "description": "Key of another field (from the top-level `fields` dict, or a table column key when used inside a table row context) whose current value is checked." },
+        "operator": {
+          "enum": ["equals", "notEquals", "in", "notIn", "greaterThan", "greaterThanOrEqual", "lessThan", "lessThanOrEqual", "isEmpty", "isNotEmpty", "contains"]
+        },
+        "value": { "description": "Comparison value. Not used (and should be omitted) when operator is isEmpty or isNotEmpty." }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "operator": { "enum": ["isEmpty", "isNotEmpty"] } } },
+          "then": { "not": { "required": ["value"] } },
+          "else": { "required": ["value"] }
+        }
+      ]
+    },
+
+    "validationMessages": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Custom error message text, keyed by the same attribute name it corresponds to. This has no native HTML equivalent (the platform only exposes custom messages via JS setCustomValidity), so it's kept as a clearly separate, obviously-SKYE-specific object rather than disguised as an attribute.",
+      "properties": {
+        "required": { "type": "string" },
+        "minlength": { "type": "string" },
+        "maxlength": { "type": "string" },
+        "min": { "type": "string" },
+        "max": { "type": "string" },
+        "pattern": { "type": "string" },
+        "matchesField": { "type": "string" }
+      }
+    },
+
+    "field": {
+      "type": "object",
+      "required": ["controlType"],
+      "additionalProperties": false,
+      "properties": {
+        "page": {
+          "type": "string",
+          "description": "Key of the page (from the top-level `pages` dict) this field belongs to. Required for fields in the top-level `fields` dict; omitted for table-column fields nested inside a lookupTable, which don't belong to a page themselves."
+        },
+        "source": {
+          "enum": ["sharepoint", "virtual"],
+          "default": "sharepoint",
+          "description": "'sharepoint' fields read/write a real list column (see bindTo). 'virtual' fields exist only client-side — to feed a post-action, drive a visibleIf condition, or render static content — and are never written back to SharePoint (except lookupTable fields, which manage their own related-list writes)."
+        },
+        "bindTo": {
+          "type": "string",
+          "description": "The SharePoint column's internal `name` (not displayName) this field reads/writes, e.g. 'Favourite_x0020_Campus'. Required when source is 'sharepoint'."
+        },
+        "columnId": {
+          "type": "string",
+          "description": "Optional: the SharePoint column GUID, for extra-safe binding if the internal name might change. Takes precedence over bindTo when resolving the live column."
+        },
+        "controlType": {
+          "enum": [
+            "text", "textarea", "richtext",
+            "number", "currency",
+            "select", "radio", "checkboxGroup", "checkbox",
+            "date", "datetime-local",
+            "peoplePicker", "lookupPicker", "lookupTable",
+            "url", "file",
+            "calculatedDisplay",
+            "heading", "paragraph", "divider", "hidden"
+          ],
+          "description": "How this field is rendered. Values match native HTML input types wherever one exists (text/number/date/datetime-local/url/file/checkbox/radio/hidden), so anyone who knows HTML recognizes them directly. 'checkbox' covers both a plain checkbox and a toggle-switch look \u2014 see `appearance`. 'file' covers both generic uploads and image uploads \u2014 restrict to images via `attributes.accept: \"image/*\"`. For 'sharepoint' fields, if controlType is omitted, SKYE infers a default from the live column's Graph data type. 'heading'/'paragraph'/'divider' are content-only and require source: 'virtual'. 'lookupTable' renders an editable data table backed by a related SharePoint list — see `table`. 'hidden' is the direct equivalent of <input type=\"hidden\">: present, submits a value, never shown \u2014 use it instead of trying to visually hide a normal control."
+        },
+        "label": { "type": "string", "description": "Overrides the column's displayName; also the heading text when controlType is 'heading'." },
+        "subtitle": { "type": "string" },
+        "helpText": { "type": "string" },
+        "defaultValue": {},
+        "readonly": { "type": "boolean", "default": false, "description": "Matches the HTML `readonly` attribute both in name and meaning." },
+        "appearance": {
+          "enum": ["default", "switch"],
+          "default": "default",
+          "description": "Cosmetic variant, primarily meaningful for controlType 'checkbox': 'switch' renders as a toggle-switch instead of a checkbox box. Purely visual \u2014 the underlying value and semantics are unchanged."
+        },
+        "options": {
+          "type": "array",
+          "description": "Overrides the choice list for select/radio/checkboxGroup controls.",
+          "items": {
+            "type": "object",
+            "required": ["value"],
+            "additionalProperties": false,
+            "properties": { "value": {}, "label": { "type": "string" } }
+          }
+        },
+
+        "required": { "type": "boolean", "default": false, "description": "Matches the HTML `required` attribute." },
+        "minlength": { "type": "integer", "minimum": 0, "description": "Matches the HTML `minlength` attribute." },
+        "maxlength": { "type": "integer", "minimum": 0, "description": "Matches the HTML `maxlength` attribute." },
+        "min": { "type": "number", "description": "Matches the HTML `min` attribute (number/date/datetime-local controls)." },
+        "max": { "type": "number", "description": "Matches the HTML `max` attribute (number/date/datetime-local controls)." },
+        "pattern": { "type": "string", "description": "Matches the HTML `pattern` attribute: a regular expression the value must match." },
+        "matchesField": { "type": "string", "description": "SKYE-specific, no native HTML equivalent: value must equal another field's value, referenced by field key (e.g. a 'confirm email' field)." },
+        "customValidators": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "SKYE-specific, no native HTML equivalent: names of validator functions, for logic too custom to express declaratively. These names are keyed against a hardcoded, reviewed registry that ships in the SKYE app source \u2014 config files never supply or reference executable code fetched from SharePoint. A name with no matching registry entry is a config error at load time, not a silent no-op."
+        },
+        "validationMessages": { "$ref": "#/$defs/validationMessages" },
+
+        "attributes": { "$ref": "#/$defs/htmlAttributes" },
+        "style": { "$ref": "#/$defs/cssStyle" },
+
+        "visibleIf": { "$ref": "#/$defs/condition", "description": "If present, this field is hidden unless the condition is met, evaluated against other field values on the same page (or earlier pages)." },
+        "order": { "type": "integer", "description": "Tab/reading order for accessibility. Also used as left-to-right column order for lookupTable columns." },
+        "table": { "$ref": "#/$defs/lookupTable", "description": "Required when controlType is 'lookupTable'." },
+        "fileStorage": { "$ref": "#/$defs/fileStorage", "description": "Only meaningful when controlType is 'file'. Defaults to target: 'attachment' if omitted." },
+        "calculatedDisplay": { "$ref": "#/$defs/calculatedExpression", "description": "Required when controlType is 'calculatedDisplay': a structured expression (no free-text formula language) describing how to derive this field's displayed value from other fields." },
+        "relatedList": {
+          "type": "object",
+          "required": ["id", "displayField"],
+          "additionalProperties": false,
+          "description": "Required when controlType is 'lookupPicker': identifies the related SharePoint list this single-item picker searches, and which internal column name to show as each search result's label. (Found necessary during implementation — the schema previously had no way to configure what a lookupPicker actually searches; lookupTable already had the analogous `table.relatedList`.)",
+          "properties": {
+            "id": { "type": "string", "description": "GUID of the related SharePoint list to search." },
+            "siteId": { "type": "string", "description": "Optional, if the related list lives on a different site than this form's primary list." },
+            "displayField": { "type": "string", "description": "Internal `name` of the related list's column to display as each search result's label, e.g. \"Title\"." }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "source": { "const": "sharepoint" } } },
+          "then": { "required": ["bindTo"] }
+        },
+        {
+          "if": { "properties": { "controlType": { "enum": ["heading", "paragraph", "divider"] } } },
+          "then": { "properties": { "source": { "const": "virtual" } } }
+        },
+        {
+          "if": { "properties": { "controlType": { "const": "lookupTable" } } },
+          "then": { "required": ["table"] }
+        },
+        {
+          "if": { "properties": { "controlType": { "const": "calculatedDisplay" } } },
+          "then": { "required": ["calculatedDisplay"] }
+        },
+        {
+          "if": { "properties": { "controlType": { "const": "lookupPicker" } } },
+          "then": { "required": ["relatedList"] }
+        }
+      ]
+    },
+
+    "fileStorage": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where a 'file' controlType field's uploads are stored. Defaults to 'attachment' (uploads attach directly to the primary list item) when omitted.",
+      "properties": {
+        "target": { "enum": ["attachment", "library"], "default": "attachment" },
+        "library": {
+          "type": "object",
+          "description": "Required when target is 'library'.",
+          "required": ["driveId"],
+          "additionalProperties": false,
+          "properties": {
+            "driveId": { "type": "string", "description": "Graph drive (document library) ID the file is uploaded into." },
+            "siteId": { "type": "string", "description": "Optional, if the target document library lives on a different site than this form's primary list." },
+            "folderPath": { "type": "string", "description": "Optional subfolder within the drive, e.g. 'EventSignups/2026'." }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "target": { "const": "library" } } },
+          "then": { "required": ["library"] }
+        }
+      ]
+    },
+
+    "calculatedExpression": {
+      "description": "A structured, non-code expression for deriving a calculatedDisplay field's value from other fields \u2014 same philosophy as `condition`: inspectable by SKYE without parsing code, and learnable without teaching a scripting language.",
+      "type": "object",
+      "required": ["op"],
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "enum": ["sum", "subtract", "multiply", "divide", "concat", "min", "max"],
+          "description": "sum/multiply/min/max take 2+ fields. subtract/divide are left-to-right over the fields list (a - b - c, a / b / c). concat joins string values, optionally with `separator`."
+        },
+        "fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 2,
+          "description": "Keys of other fields (from the top-level `fields` dict) whose current values feed the expression, in order."
+        },
+        "separator": { "type": "string", "default": "", "description": "Only used by 'concat'." }
+      }
+    },
+
+    "lookupTable": {
+      "type": "object",
+      "required": ["relatedList", "linkMode", "columns"],
+      "additionalProperties": false,
+      "description": "Backs a lookupTable field with rows editable inline, sourced from a separate SharePoint list.",
+      "properties": {
+        "relatedList": {
+          "type": "object",
+          "required": ["id"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "description": "GUID of the related SharePoint list the table's rows live in." },
+            "siteId": { "type": "string", "description": "Optional, if the related list lives on a different site than this form's primary list." }
+          }
+        },
+        "linkMode": {
+          "enum": ["lookupColumn", "parentReference"],
+          "description": "'lookupColumn': this field's own `bindTo` is a (usually multi-value) lookup column on the PRIMARY list; table rows are the related-list items that column's LookupId values point at. 'parentReference': rows are related-list items whose own lookup column (parentReferenceColumn) points back at the primary item's ID — the common 'line items' pattern. Note: with parentReference on a new (not-yet-created) item, there's no parent ID for rows to reference until the primary item is first saved."
+        },
+        "parentReferenceColumn": {
+          "type": "string",
+          "description": "Required when linkMode is parentReference: internal `name` of the lookup column on the RELATED list that stores the back-reference to this item."
+        },
+        "columns": {
+          "type": "object",
+          "description": "Dict of table columns, each a field-like definition (reuses the field shape: bindTo/controlType/label/required/etc, targeting columns on the RELATED list). Ordered left-to-right via each column's `order`.",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$" },
+          "additionalProperties": { "$ref": "#/$defs/field" }
+        },
+        "allowAdd": { "type": "boolean", "default": true },
+        "allowEdit": { "type": "boolean", "default": true },
+        "allowDelete": { "type": "boolean", "default": true },
+        "minRows": { "type": "integer", "minimum": 0 },
+        "maxRows": { "type": "integer" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "linkMode": { "const": "parentReference" } } },
+          "then": { "required": ["parentReferenceColumn"] }
+        }
+      ]
+    },
+
+    "postAction": {
+      "type": "object",
+      "required": ["trigger", "type"],
+      "description": "A single post-submit action. Actions within the same trigger phase can depend on one another via dependsOn, and can reference each other's outputs via {{results.<actionKey>.<path>}} template placeholders. The primary SharePoint list item created/updated by the form itself is available separately as {{item.<path>}} (e.g. {{item.id}}), distinct from {{results.<actionKey>...}} which holds a specific postAction's own output.",
+      "properties": {
+        "trigger": { "enum": ["beforeSubmit", "afterSubmit", "onSuccess", "onError"] },
+        "when": { "$ref": "#/$defs/condition", "description": "Optional guard; action only runs if this condition is true." },
+        "dependsOn": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Keys of other postActions (within the same trigger phase) that must complete successfully before this one starts. Actions that don't depend on each other may run in parallel. If this action's config references {{results.X...}}, X must be listed here \u2014 not enforced by this schema, but should be checked by a build-time lint."
+        },
+        "type": { "enum": ["httpRequest", "graphRequest", "redirect", "showMessage", "setField", "script"] },
+        "label": { "type": "string", "description": "Short name for this action shown in the submission-progress UI, e.g. 'Notify catering'." },
+        "loadingMessage": { "type": "string", "description": "Message shown while this action is in flight. Falls back to `label` if omitted." },
+        "successMessage": { "type": "string", "description": "Optional brief confirmation shown in the progress UI when this specific action completes successfully." },
+        "errorMessage": { "type": "string", "description": "Optional message shown in the progress UI if this specific action fails." },
+        "showInProgress": { "type": "boolean", "default": true, "description": "Whether this action appears at all in the user-facing progress UI." },
+        "runIfDependencySkipped": {
+          "type": "boolean",
+          "default": false,
+          "description": "Default: if any action in dependsOn was skipped (its own `when` was false, or it was itself skipped by this same cascade), this action is skipped too, automatically. A skip is not a failure \u2014 it doesn't trigger onError. Set true for an action that should run regardless; in that case any {{results.<thatAction>...}} placeholder it references resolves to an empty value."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "httpRequest" } } },
+          "then": {
+            "required": ["request"],
+            "properties": {
+              "request": {
+                "type": "object",
+                "required": ["url", "method"],
+                "properties": {
+                  "url": { "type": "string" },
+                  "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+                  "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+                  "params": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Query string parameters, appended to `url` after interpolation (not baked into `url` itself). String values may include {{fields.someFieldKey}} placeholders." },
+                  "body": { "description": "JSON body template; string values may include {{fields.someFieldKey}} placeholders." }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "graphRequest" } } },
+          "then": {
+            "required": ["request"],
+            "properties": {
+              "request": {
+                "type": "object",
+                "required": ["url", "method"],
+                "properties": {
+                  "url": { "type": "string", "description": "Graph API path, e.g. '/sites/{{siteId}}/lists/{{listId}}/items'." },
+                  "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+                  "body": { "description": "JSON body template, {{fields.x}} interpolation supported." }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "redirect" } } },
+          "then": { "required": ["to"], "properties": { "to": { "type": "string", "description": "Path or URL, may include {{fields.x}}, {{item.x}}, or {{results.actionKey.x}} placeholders." } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "showMessage" } } },
+          "then": {
+            "required": ["message"],
+            "properties": { "message": { "type": "string" }, "level": { "enum": ["info", "success", "warning", "error"], "default": "info" } }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "setField" } } },
+          "then": { "required": ["field", "value"], "properties": { "field": { "type": "string" }, "value": {} } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "script" } } },
+          "then": {
+            "required": ["functionName"],
+            "properties": {
+              "functionName": { "type": "string", "description": "Key into a hardcoded, reviewed registry of script actions shipped in the SKYE app source. Never a reference to code fetched from SharePoint \u2014 an unregistered name is a config error at run time." },
+              "args": { "type": "array" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

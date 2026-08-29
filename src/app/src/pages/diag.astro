@@ -1,0 +1,23 @@
+---
+// A standalone Graph auth/permissions diagnostic page — NOT part of SKYE's
+// real user-facing routing. Exists to isolate exactly which layer is
+// failing when a live-tenant auth attempt goes wrong: token acquisition
+// itself (app-registration/consent/platform-type issues) vs. a specific
+// Graph scope (Sites.Selected/Calendars.ReadWrite.Shared/User.ReadBasic.All)
+// vs. a specific site's Sites.Selected grant. All real work happens in
+// entry-diag.ts, which reuses the app's actual authProvider.ts/GraphClient
+// code so this tests the real code path, not a reimplementation.
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SKYE — Graph Diagnostics</title>
+    <link rel="stylesheet" href="/styles/form.css" />
+  </head>
+  <body>
+    <div id="skye-app">Loading…</div>
+    <script src="../scripts/entry-diag.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,22 @@
+---
+// The form-config builder: create/edit skye_data/forms/[id]/form.config.json
+// (and its [permission] overlays) without hand-writing JSON. All real work
+// happens in entry-builder.ts; this file only owns the mount point and
+// script tag, same pattern as every other page in this app. Needs
+// ?applicationId= (or PUBLIC_DEFAULT_APPLICATION_ID) to authenticate, same
+// as /switcher — see entry-builder.ts's own docstring for the full flow.
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SKYE — Form Builder</title>
+    <link rel="stylesheet" href="/styles/form.css" />
+    <link rel="stylesheet" href="/styles/builder.css" />
+  </head>
+  <body>
+    <div id="skye-app">Loading…</div>
+    <script src="../scripts/entry-builder.ts"></script>
+  </body>
+</html>

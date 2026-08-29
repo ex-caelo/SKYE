@@ -1,0 +1,28 @@
+---
+// The Custom View page. Loads one sandboxed, author-written view by id from
+// the hash (`/view?siteId=&applicationId=&tenantId=#{viewId}`). All real
+// work is in entry-view.ts; this file owns the mount point, the shared
+// stylesheet, and the top-level-page CSP.
+import "../styles/view.css";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      frame-src 'self' is the top-level-page half of the isolation model
+      (CUSTOM-VIEWS-SPEC.md §3.7): the sandbox attribute alone does not stop
+      a view navigating its OWN frame to an external URL — this does. A real
+      deployment should also send this, plus frame-ancestors, as an HTTP
+      response header (outside Astro static output's control).
+    -->
+    <meta http-equiv="Content-Security-Policy" content="frame-src 'self'" />
+    <title>SKYE — View</title>
+  </head>
+  <body>
+    <div id="skye-app">Loading…</div>
+    <script src="../scripts/entry-view.ts"></script>
+  </body>
+</html>

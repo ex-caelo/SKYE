@@ -1,0 +1,19 @@
+---
+// The site-switcher page: reached directly (with ?applicationId=), or via
+// a redirect from entry-form.ts when /form can't resolve a route (no
+// siteId yet). All real work happens in entry-switcher.ts; this file only
+// owns the mount point and script tag.
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SKYE — Choose a site</title>
+    <link rel="stylesheet" href="/styles/form.css" />
+  </head>
+  <body>
+    <div id="skye-app">Loading…</div>
+    <script src="../scripts/entry-switcher.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,4 @@
+[
+  { "siteId": "site-luddy", "displayName": "Luddy School of Informatics", "webUrl": "https://example.sharepoint.com/sites/luddy" },
+  { "siteId": "site-events", "displayName": "Campus Events", "webUrl": "https://example.sharepoint.com/sites/events" }
+]

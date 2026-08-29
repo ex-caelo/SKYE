@@ -1,23 +1,19 @@
 {
-	"name": "SKYE",
-	"version": "1.0.0",
-	"description": "",
-	"main": "index.js",
-	"scripts": {
+  "name": "skye",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.23.0",
+  "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev"
-	},
-	"keywords": [],
-	"author": "",
-	"license": "MIT",
-	"packageManager": "pnpm@10.30.0",
-	"devEngines": {
-		"packageManager": {
-			"name": "pnpm",
-			"version": "10.30.0"
-		}
-	},
-	"dependencies": {
-		"turbo": "^2.10.11"
-	}
+    "test": "turbo run test",
+    "test:config": "turbo run test --filter=@skye/config",
+    "test:watch": "turbo run test:watch",
+    "typecheck": "turbo run typecheck",
+    "dev": "turbo run dev",
+    "lint:configs": "turbo run lint:configs --"
+  },
+  "devDependencies": {
+    "turbo": "^2.10.11",
+    "typescript": "^5.6.0"
+  }
 }

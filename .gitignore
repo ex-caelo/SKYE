@@ -9,6 +9,12 @@ lerna-debug.log*
 # turbo
 .turbo
 
+# playwright (Custom Views browser gate)
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
 # macOS
 .DS_Store
 

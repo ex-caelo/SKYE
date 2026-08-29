@@ -1,0 +1,6 @@
+[
+  { "id": "person-1", "displayName": "Alex Chen", "email": "alex.chen@example.edu" },
+  { "id": "person-2", "displayName": "Jordan Rivera", "email": "jordan.rivera@example.edu" },
+  { "id": "person-3", "displayName": "Sam Patel", "email": "sam.patel@example.edu" },
+  { "id": "person-4", "displayName": "Morgan Lee", "email": "morgan.lee@example.edu" }
+]

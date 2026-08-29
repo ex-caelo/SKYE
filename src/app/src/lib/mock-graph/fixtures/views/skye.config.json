@@ -1,0 +1,10 @@
+{
+  "views": {
+    "allowedLists": ["Events", "EventDetails"]
+  },
+  "navigation": {
+    "allowedExternalOrigins": ["https://intranet.example.org"]
+  },
+  "home": { "type": "view", "id": "calendar" },
+  "builderEditors": ["admin"]
+}

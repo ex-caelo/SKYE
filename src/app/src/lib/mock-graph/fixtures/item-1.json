@@ -1,0 +1,13 @@
+{
+  "id": "1",
+  "etag": "\"1\"",
+  "fields": {
+    "Title": "Jane Doe",
+    "Favourite_x0020_Campus": "Bloomington",
+    "Haiku": "Snow falls on the quad\nCoffee steam meets winter air\nFinals week begins",
+    "Quantity": 2,
+    "Price": 12.5,
+    "Event_x0020_Start_x0020_Time": "2026-09-15T18:00:00Z",
+    "Do_x0020_you_x0020_like_x0020_ca": true
+  }
+}

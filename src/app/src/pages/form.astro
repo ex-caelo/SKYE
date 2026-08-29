@@ -1,0 +1,22 @@
+---
+// The form page: create/edit/view are all this one page, distinguished by
+// the hash's mode segment (see lib/routing/router.ts) — `view` is an
+// app-level render flag, not a separate route (see TODO §3), so it doesn't
+// get a separate page either. If the route can't be resolved (no siteId
+// yet), entry-form.ts redirects to /switcher rather than rendering here.
+// All real work happens in entry-form.ts; this file only owns the mount
+// point and script tag.
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SKYE — Form</title>
+    <link rel="stylesheet" href="/styles/form.css" />
+  </head>
+  <body>
+    <div id="skye-app">Loading…</div>
+    <script src="../scripts/entry-form.ts"></script>
+  </body>
+</html>

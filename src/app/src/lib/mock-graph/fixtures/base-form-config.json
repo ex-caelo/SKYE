@@ -1,0 +1,243 @@
+{
+  "id": "test-event-signup",
+  "title": "Event Sign-up",
+  "description": "Tell us about yourself and your order for the event.",
+  "mode": "both",
+  "list": { "id": "66742a26-e579-4314-88b4-f6b62bf36458" },
+  "layout": { "gridTemplateColumns": 12, "gap": "1rem" },
+
+  "pages": {
+    "aboutYou": {
+      "title": "About you",
+      "order": 1,
+      "layout": {
+        "gridTemplateColumns": "2fr 1fr",
+        "gridTemplateAreas": [
+          "name name",
+          "haiku attendingBanquet",
+          "haiku campus"
+        ]
+      }
+    },
+    "yourOrder": {
+      "title": "Your order",
+      "order": 2,
+      "layout": {
+        "gridTemplateAreas": [
+          "quantity quantity quantity price price price startTime startTime startTime startTime startTime startTime",
+          "likesCats likesCats likesCats likesCats . . . . . . . .",
+          "agreeToTerms agreeToTerms agreeToTerms agreeToTerms agreeToTerms agreeToTerms agreeToTerms agreeToTerms agreeToTerms agreeToTerms agreeToTerms agreeToTerms"
+        ]
+      }
+    },
+    "banquetDetails": {
+      "title": "Banquet details",
+      "order": 3,
+      "visibleIf": { "field": "attendingBanquet", "operator": "equals", "value": true },
+      "layout": {
+        "gridTemplateAreas": [
+          "guestList guestList guestList guestList guestList guestList guestList guestList guestList guestList guestList guestList"
+        ]
+      }
+    }
+  },
+
+  "fields": {
+    "name": {
+      "page": "aboutYou",
+      "source": "sharepoint",
+      "bindTo": "Title",
+      "controlType": "text",
+      "label": "Full name",
+      "required": true,
+      "maxlength": 255,
+      "validationMessages": { "required": "We need a name to reserve your spot." },
+      "attributes": { "autocomplete": "name", "placeholder": "Jane Doe" },
+      "order": 1
+    },
+    "campus": {
+      "page": "aboutYou",
+      "source": "sharepoint",
+      "bindTo": "Favourite_x0020_Campus",
+      "controlType": "select",
+      "label": "Which campus are you joining from?",
+      "order": 2
+    },
+    "attendingBanquet": {
+      "page": "aboutYou",
+      "source": "virtual",
+      "controlType": "checkbox",
+      "appearance": "switch",
+      "label": "Will you attend the banquet?",
+      "order": 3
+    },
+    "haiku": {
+      "page": "aboutYou",
+      "source": "sharepoint",
+      "bindTo": "Haiku",
+      "controlType": "richtext",
+      "label": "Write us a haiku about your favourite Luddy event",
+      "subtitle": "Bloomington folks only \u2014 it's a tradition.",
+      "visibleIf": { "field": "campus", "operator": "equals", "value": "Bloomington" },
+      "attributes": { "rows": 6 },
+      "order": 4
+    },
+
+    "quantity": {
+      "page": "yourOrder",
+      "source": "sharepoint",
+      "bindTo": "Quantity",
+      "controlType": "number",
+      "label": "Quantity",
+      "min": 1,
+      "max": 25,
+      "validationMessages": { "max": "You can order at most 25 at a time." },
+      "attributes": { "step": 1, "inputmode": "numeric" },
+      "order": 1
+    },
+    "price": {
+      "page": "yourOrder",
+      "source": "sharepoint",
+      "bindTo": "Price",
+      "controlType": "currency",
+      "label": "Price per item",
+      "readonly": true,
+      "style": { "color": "#6b7280" },
+      "order": 2
+    },
+    "startTime": {
+      "page": "yourOrder",
+      "source": "sharepoint",
+      "bindTo": "Event_x0020_Start_x0020_Time",
+      "controlType": "datetime-local",
+      "label": "Preferred start time",
+      "order": 3
+    },
+    "likesCats": {
+      "page": "yourOrder",
+      "source": "sharepoint",
+      "bindTo": "Do_x0020_you_x0020_like_x0020_ca",
+      "controlType": "checkbox",
+      "appearance": "switch",
+      "label": "Do you like cats?",
+      "order": 4
+    },
+    "agreeToTerms": {
+      "page": "yourOrder",
+      "source": "virtual",
+      "controlType": "checkbox",
+      "label": "I agree to the event terms",
+      "required": true,
+      "validationMessages": { "required": "Please accept the event terms to continue." },
+      "order": 5
+    },
+
+    "guestList": {
+      "page": "banquetDetails",
+      "source": "virtual",
+      "controlType": "lookupTable",
+      "label": "Banquet guests",
+      "subtitle": "Add each guest attending the banquet with you.",
+      "order": 1,
+      "table": {
+        "relatedList": { "id": "d3db58b5-b82e-49c6-949a-a5a6dbb9fc85" },
+        "linkMode": "parentReference",
+        "parentReferenceColumn": "Correlated_x0020_Event",
+        "allowAdd": true,
+        "allowEdit": true,
+        "allowDelete": true,
+        "minRows": 0,
+        "maxRows": 8,
+        "columns": {
+          "guestName": {
+            "source": "sharepoint",
+            "bindTo": "Title",
+            "controlType": "text",
+            "label": "Guest name",
+            "required": true,
+            "order": 1
+          },
+          "mealChoice": {
+            "source": "sharepoint",
+            "bindTo": "Favourite_x0020_Campus",
+            "controlType": "select",
+            "label": "Meal choice",
+            "options": [
+              { "value": "chicken", "label": "Chicken" },
+              { "value": "veggie", "label": "Vegetarian" },
+              { "value": "fish", "label": "Fish" }
+            ],
+            "order": 2
+          },
+          "dietaryNotes": {
+            "source": "sharepoint",
+            "bindTo": "Haiku",
+            "controlType": "textarea",
+            "label": "Dietary notes",
+            "order": 3
+          }
+        }
+      }
+    }
+  },
+
+  "postActions": {
+    "notifySlack": {
+      "trigger": "afterSubmit",
+      "type": "httpRequest",
+      "label": "Notify the team",
+      "loadingMessage": "Letting the events team know...",
+      "request": {
+        "url": "https://hooks.example.com/event-signup",
+        "method": "POST",
+        "headers": { "Content-Type": "application/json" },
+        "body": { "name": "{{fields.name}}", "campus": "{{fields.campus}}", "quantity": "{{fields.quantity}}" }
+      }
+    },
+    "createFollowupTicket": {
+      "trigger": "afterSubmit",
+      "type": "httpRequest",
+      "when": { "field": "attendingBanquet", "operator": "equals", "value": true },
+      "label": "Create follow-up ticket",
+      "loadingMessage": "Creating a follow-up ticket for catering...",
+      "errorMessage": "Couldn't create a follow-up ticket \u2014 catering will be notified manually.",
+      "request": {
+        "url": "https://tickets.example.com/api/tickets",
+        "method": "POST",
+        "headers": { "Content-Type": "application/json" },
+        "body": { "subject": "Banquet headcount for {{fields.name}}", "itemId": "{{item.id}}" }
+      }
+    },
+    "notifyCatering": {
+      "trigger": "afterSubmit",
+      "type": "httpRequest",
+      "when": { "field": "attendingBanquet", "operator": "equals", "value": true },
+      "dependsOn": ["createFollowupTicket"],
+      "label": "Notify catering",
+      "loadingMessage": "Sending headcount to catering...",
+      "successMessage": "Catering notified.",
+      "request": {
+        "url": "https://hooks.example.com/banquet-headcount",
+        "method": "POST",
+        "headers": { "Content-Type": "application/json" },
+        "body": {
+          "name": "{{fields.name}}",
+          "ticketId": "{{results.createFollowupTicket.ticketId}}"
+        }
+      }
+    },
+    "goToConfirmation": {
+      "trigger": "onSuccess",
+      "type": "redirect",
+      "showInProgress": false,
+      "to": "/confirmation?item={{item.id}}"
+    },
+    "showError": {
+      "trigger": "onError",
+      "type": "showMessage",
+      "showInProgress": false,
+      "level": "error",
+      "message": "Something went wrong submitting your sign-up. Please try again."
+    }
+  }
+}

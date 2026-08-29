@@ -1,0 +1,5 @@
+tr.ok td:last-child { color: #15803d; font-weight: 600; }
+tr.bad td:last-child { color: #b91c1c; font-weight: 700; }
+tr.grp td { background: #f3f4f6; font-weight: 600; }
+#summary.ok { color: #15803d; font-weight: 700; }
+#summary.bad { color: #b91c1c; font-weight: 700; }

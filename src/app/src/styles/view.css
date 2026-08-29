@@ -1,0 +1,76 @@
+/*
+ * Shared stylesheet for the Custom Views feature. Loaded TWO ways, on
+ * purpose, so a sandboxed view and the page hosting it look identical
+ * (TODO §16, Q1):
+ *   1. view.astro imports it, so Astro bundles + serves it for the /view page.
+ *   2. viewHost.ts imports it with `?raw` and inlines it into the frame's
+ *      srcdoc <style> — the frame has no origin and cannot fetch /styles/…,
+ *      so this is the only way it gets SKYE's look.
+ * Keep it self-contained: no @import, no url() to external hosts (the
+ * frame's CSP is default-src 'none').
+ *
+ * Baseline mirrors public/styles/form.css so forms and views match.
+ */
+
+:root {
+  --skye-text: #1a1a1a;
+  --skye-muted: #666;
+  --skye-accent: #2563eb;
+  --skye-error: #b91c1c;
+  --skye-warning: #b45309;
+  --skye-success: #15803d;
+  --skye-border: #ddd;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  margin: 0;
+  padding: 1.5rem;
+  color: var(--skye-text);
+  line-height: 1.5;
+}
+
+h1, h2, h3 { margin: 0 0 0.5rem; line-height: 1.25; }
+a { color: var(--skye-accent); }
+
+button {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--skye-border);
+  border-radius: 4px;
+  background: #f7f7f8;
+  cursor: pointer;
+}
+button:hover { background: #eef0f3; }
+
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { border: 1px solid var(--skye-border); padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+
+/* --- /view host chrome (outside the frame) --- */
+
+.skye-view__frame {
+  width: 100%;
+  min-height: 70vh;
+  border: 1px solid var(--skye-border);
+  border-radius: 6px;
+  background: #fff;
+}
+.skye-view__status { font-size: 0.9rem; color: var(--skye-muted); margin-bottom: 0.75rem; min-height: 1.2em; }
+.skye-view__status[data-level="error"] { color: var(--skye-error); }
+.skye-view__status[data-level="warning"] { color: var(--skye-warning); }
+
+.skye-view__message {
+  max-width: 40rem;
+  margin: 3rem auto;
+  text-align: center;
+}
+.skye-view__message h1 { font-size: 1.25rem; }
+.skye-view__message p { color: var(--skye-muted); }
+
+/* --- switcher list (shared with the site/form/view picker) --- */
+.skye-site-switcher ul { list-style: none; padding: 0; }
+.skye-site-switcher li { margin-bottom: 0.5rem; }
+.skye-site-switcher button { padding: 0.5rem 1rem; width: 100%; text-align: left; }
+.skye-picker-kind { color: var(--skye-muted); font-size: 0.8rem; margin-left: 0.4rem; }

@@ -1,0 +1,32 @@
+{
+  "title": "Event Sign-up (Admin)",
+  "pages": {
+    "adminReview": {
+      "title": "Admin review",
+      "order": 4,
+      "layout": {
+        "gridTemplateAreas": [
+          "staffNotes staffNotes staffNotes staffNotes staffNotes staffNotes staffNotes staffNotes staffNotes staffNotes staffNotes staffNotes"
+        ]
+      }
+    }
+  },
+  "fields": {
+    "price": {
+      "page": "yourOrder",
+      "source": "sharepoint",
+      "bindTo": "Price",
+      "controlType": "currency",
+      "label": "Price per item",
+      "readonly": false
+    },
+    "staffNotes": {
+      "page": "adminReview",
+      "source": "sharepoint",
+      "bindTo": "Best_x0020_Friends",
+      "controlType": "peoplePicker",
+      "label": "Staff assigned to follow up",
+      "order": 1
+    }
+  }
+}

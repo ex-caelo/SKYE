@@ -1,0 +1,33 @@
+{
+  "Events": {
+    "columns": [
+      { "name": "Title", "displayName": "Title", "columnType": "text", "required": true },
+      { "name": "Start", "displayName": "Start date", "columnType": "dateTime" },
+      { "name": "End", "displayName": "End date", "columnType": "dateTime" },
+      { "name": "Location", "displayName": "Location", "columnType": "text" },
+      { "name": "Category", "displayName": "Track", "columnType": "choice", "choices": ["talk", "workshop", "social"] },
+      { "name": "Capacity", "displayName": "Capacity", "columnType": "number" },
+      { "name": "Poster", "displayName": "Poster", "columnType": "hyperlinkOrPicture" }
+    ],
+    "items": [
+      { "id": "1", "fields": { "Title": "Opening Keynote", "Start": "2026-09-02", "End": "2026-09-02", "Location": "Auditorium", "Category": "talk", "Capacity": 300, "Poster": "https://demo.sharepoint.com/sites/demo/SiteAssets/keynote.png" } },
+      { "id": "2", "fields": { "Title": "Intro to SKYE Views", "Start": "2026-09-04", "End": "2026-09-04", "Location": "Lab 2", "Category": "workshop", "Capacity": 30 } },
+      { "id": "3", "fields": { "Title": "Community Mixer", "Start": "2026-09-04", "End": "2026-09-04", "Location": "Atrium", "Category": "social", "Capacity": 120 } },
+      { "id": "4", "fields": { "Title": "Advanced Querying", "Start": "2026-09-11", "End": "2026-09-11", "Location": "Lab 2", "Category": "workshop", "Capacity": 30 } },
+      { "id": "5", "fields": { "Title": "Closing Panel", "Start": "2026-09-18", "End": "2026-09-18", "Location": "Auditorium", "Category": "talk", "Capacity": 300 } },
+      { "id": "6", "fields": { "Title": "October Planning", "Start": "2026-10-01", "End": "2026-10-01", "Location": "Room 4", "Category": "talk", "Capacity": 40 } }
+    ]
+  },
+  "EventDetails": {
+    "columns": [
+      { "name": "Title", "displayName": "Title", "columnType": "text" },
+      { "name": "EventId", "displayName": "Event", "columnType": "number" },
+      { "name": "Host", "displayName": "Host", "columnType": "text" },
+      { "name": "Description", "displayName": "Description", "columnType": "note" }
+    ],
+    "items": [
+      { "id": "1", "fields": { "Title": "Keynote detail", "EventId": 1, "Host": "Dr. Lee", "Description": "Welcome and the year ahead." } },
+      { "id": "2", "fields": { "Title": "Workshop detail", "EventId": 2, "Host": "R. Patel", "Description": "Hands-on: build your first view." } }
+    ]
+  }
+}

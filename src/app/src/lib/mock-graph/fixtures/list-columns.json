@@ -1,0 +1,10 @@
+[
+  { "name": "Title", "displayName": "Title", "columnType": "text", "required": true },
+  { "name": "Favourite_x0020_Campus", "displayName": "Favourite Campus", "columnType": "choice", "choices": ["Bloomington", "Indianapolis", "Columbus"] },
+  { "name": "Haiku", "displayName": "Haiku", "columnType": "note" },
+  { "name": "Quantity", "displayName": "Quantity", "columnType": "number" },
+  { "name": "Price", "displayName": "Price", "columnType": "currency" },
+  { "name": "Event_x0020_Start_x0020_Time", "displayName": "Event Start Time", "columnType": "dateTime" },
+  { "name": "Do_x0020_you_x0020_like_x0020_ca", "displayName": "Do you like cats?", "columnType": "boolean" },
+  { "name": "Best_x0020_Friends", "displayName": "Best Friends", "columnType": "personOrGroup" }
+]

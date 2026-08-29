@@ -1,0 +1,8 @@
+{
+  "views": {
+    "allowedLists": ["AuditLog"]
+  },
+  "navigation": {
+    "allowedExternalOrigins": ["https://admin.example.org"]
+  }
+}

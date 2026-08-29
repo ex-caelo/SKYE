@@ -1,0 +1,51 @@
+/* /builder — minimal, functional-only styling (see CLAUDE.md: no design pass yet). */
+
+.skye-builder__topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #ddd; }
+.skye-builder__topbar h1 { font-size: 1.1rem; margin: 0; flex-basis: 100%; }
+.skye-builder__save { font-weight: 600; }
+.skye-builder__errors { list-style: none; padding: 0; margin: 0.5rem 0 0; flex-basis: 100%; color: #b91c1c; font-size: 0.85rem; }
+.skye-builder__errors .skye-builder__warning { color: #b45309; }
+
+.skye-builder__split { display: flex; gap: 1.5rem; align-items: flex-start; }
+.skye-builder__preview-pane { flex: 1 1 55%; min-width: 0; border: 1px solid #ddd; padding: 1rem; }
+.skye-builder__editor-pane { flex: 1 1 45%; min-width: 0; max-height: 80vh; overflow-y: auto; border: 1px solid #ddd; padding: 1rem; }
+
+.skye-builder__object { display: flex; flex-direction: column; gap: 0.5rem; }
+.skye-builder__row { display: grid; grid-template-columns: 10rem 1fr; align-items: start; gap: 0.5rem; }
+.skye-builder__row input[type="text"], .skye-builder__row input[type="number"], .skye-builder__row textarea, .skye-builder__row select { width: 100%; box-sizing: border-box; }
+.skye-builder__label { font-size: 0.85rem; font-weight: 600; padding-top: 0.25rem; }
+
+.skye-builder__nested { border-left: 2px solid #e5e7eb; padding-left: 0.5rem; }
+.skye-builder__nested-body { margin-top: 0.4rem; }
+.skye-builder__array-item, .skye-builder__dict-entry { border: 1px solid #eee; padding: 0.5rem; margin-bottom: 0.5rem; }
+.skye-builder__dict-entry-heading { font-weight: 600; font-size: 0.85rem; margin-bottom: 0.3rem; display: flex; justify-content: space-between; }
+.skye-builder__dict-add { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.4rem; }
+.skye-builder__dict-add-error, .skye-builder__new-form-error { color: #b91c1c; font-size: 0.8rem; }
+
+.skye-builder__settings h3 { margin: 1rem 0 0.4rem; font-size: 0.95rem; }
+.skye-builder__add-field { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+.skye-builder__overlay-note { font-size: 0.85rem; color: #666; background: #f9fafb; padding: 0.5rem; }
+
+.skye-builder__new-form { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #ddd; display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.skye-builder__new-form input { flex: 1 1 auto; min-width: 10rem; }
+
+/* --- shared modal confirm dialog (lib/ui/confirmDialog.ts) — used by /builder's save-review diff and /form's draft-preview run-actions gate --- */
+.skye-dialog-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.skye-dialog { background: white; max-width: 40rem; width: 90%; max-height: 85vh; overflow-y: auto; padding: 1.25rem; border-radius: 4px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25); }
+.skye-dialog h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
+.skye-dialog__body { margin-bottom: 1rem; }
+.skye-dialog__actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+.skye-dialog__primary { font-weight: 600; }
+
+/* --- review-before-save diff (lib/builder/configDiffView.ts) --- */
+.skye-diff__section { margin-bottom: 1rem; }
+.skye-diff__section h4 { margin: 0 0 0.3rem; font-size: 0.95rem; }
+.skye-diff__section h5 { margin: 0.5rem 0 0.2rem; font-size: 0.85rem; color: #555; }
+.skye-diff ul { margin: 0; padding-left: 1.25rem; }
+.skye-diff li[data-status="added"] { color: #15803d; }
+.skye-diff li[data-status="removed"] { color: #b91c1c; }
+.skye-diff li[data-status="changed"] { color: #b45309; }
+
+/* --- shared message panel (lib/ui/messagePanel.ts) — e.g. /builder's permission-denied screen --- */
+.skye-message-panel[data-level="error"] h1 { color: #b91c1c; }
+.skye-message-panel[data-level="warning"] h1 { color: #b45309; }

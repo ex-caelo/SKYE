@@ -1,0 +1,28 @@
+---
+// The site root. SKYE has no real "homepage" — every real visit arrives at
+// /form or /switcher with a formId/siteId/applicationId already in hand (a
+// link from SharePoint). entry-index.ts only exists to catch a stray visit
+// still carrying the old bare-root-plus-hash link shape and forward it to
+// /form; otherwise the static message below is all that's shown.
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SKYE</title>
+    <link rel="stylesheet" href="/styles/form.css" />
+  </head>
+  <body>
+    <div id="skye-app">
+      <h1>SKYE</h1>
+      <p>
+        SKYE renders forms and views defined on a SharePoint site. Use a
+        link from your SharePoint site's <code>skye_data</code>
+        configuration, or open the <a href="/switcher">site switcher</a> if
+        you already know which form you're looking for.
+      </p>
+    </div>
+    <script src="../scripts/entry-index.ts"></script>
+  </body>
+</html>

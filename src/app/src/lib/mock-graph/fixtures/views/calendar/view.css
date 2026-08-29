@@ -1,0 +1,19 @@
+/* The host injects SKYE's shared stylesheet, so this only adds calendar-specific layout. */
+.bar { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; }
+.bar h2 { margin: 0; min-width: 11rem; text-align: center; }
+.bar #count { color: #666; font-size: 0.85rem; }
+
+.grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.grid .head { font-weight: 600; font-size: 0.8rem; text-align: center; padding: 0.25rem 0; }
+.grid .cell { min-height: 5rem; border: 1px solid #e5e7eb; border-radius: 4px; padding: 0.25rem; }
+.grid .cell.blank { border: none; }
+.grid .num { font-size: 0.75rem; color: #6b7280; }
+
+.chip { display: block; width: 100%; text-align: left; margin-top: 2px; font-size: 0.75rem; padding: 2px 4px; border-radius: 3px; }
+
+#detail { position: fixed; right: 1rem; top: 1rem; width: 20rem; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; padding: 1rem; box-shadow: 0 8px 24px rgba(0,0,0,0.12); }
+#detail img { max-width: 100%; border-radius: 4px; }
+#detail .cap { font-size: 0.75rem; color: #6b7280; }
+#closeBtn { float: right; }
+
+.foot { margin-top: 1rem; font-size: 0.8rem; color: #6b7280; }

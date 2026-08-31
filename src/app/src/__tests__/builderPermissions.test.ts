@@ -3,11 +3,21 @@ import { canEditFormConfig } from "../lib/builder/permissions.js";
 import { SkyeNotConfiguredError } from "../lib/views/viewConfig.js";
 import type { GraphClient } from "../lib/graph/types.js";
 
-function graphStub(getSkyeSiteConfigFiles: GraphClient["getSkyeSiteConfigFiles"]): GraphClient {
-  return { getSkyeSiteConfigFiles } as unknown as GraphClient;
+function graphStub(
+  getSkyeSiteConfigFiles: GraphClient["getSkyeSiteConfigFiles"],
+  canWriteSkyeData: GraphClient["canWriteSkyeData"] = vi.fn().mockResolvedValue(false)
+): GraphClient {
+  return { getSkyeSiteConfigFiles, canWriteSkyeData } as unknown as GraphClient;
 }
 
 describe("canEditFormConfig", () => {
+  it("returns true when the user can write into skye_data, without consulting builderEditors", async () => {
+    const getFiles = vi.fn().mockResolvedValue([{ source: "base", config: {} }]);
+    const graph = graphStub(getFiles, vi.fn().mockResolvedValue(true));
+    expect(await canEditFormConfig(graph, "site1")).toBe(true);
+    expect(getFiles).not.toHaveBeenCalled();
+  });
+
   it("returns true when the fetched site config grants edit access", async () => {
     const graph = graphStub(vi.fn().mockResolvedValue([
       { source: "base", config: { builderEditors: ["admin"] } },

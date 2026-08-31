@@ -1,0 +1,30 @@
+---
+/**
+ * "Set up SKYE on another site" panel — sits inside /switcher's site-picker
+ * screen. wireAddSitePanel() (src/lib/routing/siteSwitcher.ts) attaches the
+ * submit handler and returns { setStatus, setBusy } for the install flow
+ * in entry-switcher.ts to report progress through.
+ */
+---
+
+<section class="skye-add-site">
+  <h3>Set up SKYE on another site</h3>
+  <p>
+    Paste a link to the site — a SharePoint page or library URL, or a Teams
+    channel link, all work; SKYE reduces it to the site. If SKYE isn't set
+    up there yet, it creates a dedicated library with a starter config.
+  </p>
+  <form class="skye-add-site__form" data-el="form">
+    <input
+      class="skye-add-site__input"
+      data-el="input"
+      type="url"
+      name="siteUrl"
+      required
+      autocomplete="url"
+      placeholder="https://yourtenant.sharepoint.com/sites/YourSite/…"
+    />
+    <button class="skye-add-site__button" data-el="submit" type="submit">Continue</button>
+  </form>
+  <output class="skye-add-site__status" data-el="status"></output>
+</section>

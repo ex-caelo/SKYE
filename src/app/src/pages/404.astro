@@ -1,24 +1,19 @@
 ---
 // Astro's conventional not-found page (served for any unmatched real path,
 // on hosts that wire up 404.html from the static build output). Static
-// markup only, no client script needed — the "valid path, but the hash is
+// markup only, no client script — the "valid path, but the hash is
 // missing a formId/siteId" case is a different, already-handled state
 // inside entry-form.ts/entry-switcher.ts, not a routing 404.
+import BaseLayout from "../layouts/BaseLayout.astro";
 ---
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SKYE — Not found</title>
-    <link rel="stylesheet" href="/styles/form.css" />
-  </head>
-  <body>
+
+<BaseLayout title="SKYE — Not found">
+  <section data-state id="state-404">
     <h1>Page not found</h1>
     <p>
       There's nothing at this address. If you followed a link to a SKYE
       form, check it was copied in full — or start from the
       <a href="/switcher">site switcher</a>.
     </p>
-  </body>
-</html>
+  </section>
+</BaseLayout>

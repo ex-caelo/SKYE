@@ -1,0 +1,25 @@
+---
+/**
+ * The shared modal confirm dialog — one native `<dialog>` per page, driven
+ * by showConfirmDialog() in src/lib/ui/confirmDialog.ts. Used for
+ * /builder's save-review diff and publish confirmation, /form's
+ * draft-preview "run actions?" gate, and /switcher's "set up SKYE?"
+ * confirmation.
+ *
+ * `<dialog>` gives the backdrop, Esc-to-dismiss, focus containment and
+ * inert background for free. The action buttons are cloned per call from
+ * the `<template>` below (their labels/values are only known at runtime);
+ * clicking one calls `dialog.close(value)` and showConfirmDialog resolves
+ * with that value.
+ */
+---
+
+<dialog class="skye-dialog" id="skye-confirm-dialog" aria-labelledby="skye-confirm-title">
+  <h2 class="skye-dialog__heading" id="skye-confirm-title" data-slot="confirm-title"></h2>
+  <div class="skye-dialog__body" data-slot="confirm-body"></div>
+  <menu class="skye-dialog__actions" data-slot="confirm-actions"></menu>
+</dialog>
+
+<template id="skye-confirm-action-tpl">
+  <button type="button" class="skye-dialog__action"></button>
+</template>

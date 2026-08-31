@@ -1,0 +1,16 @@
+---
+/**
+ * A full-page "here's a state, not the normal content" panel — the
+ * permission-denied screen, a "SKYE isn't set up here" notice, etc.
+ * Ships hidden; `showMessagePanel()` (src/lib/ui/messagePanel.ts) reveals
+ * it via `showState`, sets `data-level`, and fills the two slots.
+ *
+ * Kept as a component (not built in TS) so the markup is reviewable HTML;
+ * one instance is included per page that can show such a state.
+ */
+---
+
+<section class="skye-message-panel" id="skye-message-panel" data-state hidden>
+  <h1 data-slot="message-title"></h1>
+  <p data-slot="message-body"></p>
+</section>

@@ -1,4 +1,6 @@
 import { looksLikeFormLink, parseAuthErrorFromHash } from "../lib/routing/router.js";
+import { completeRedirectReturn } from "../lib/auth/redirectReturn.js";
+import { showState, fillSlot } from "../lib/ui/pageState.js";
 
 /**
  * Entry point loaded by pages/index.astro (the site root). SKYE has no
@@ -9,20 +11,22 @@ import { looksLikeFormLink, parseAuthErrorFromHash } from "../lib/routing/router
  * redirectUri is the bare origin — see authProvider.ts), instead of
  * silently misreading it as a garbage formId and bouncing through several
  * confusing redirects; (2) catch a stray visit that still carries the old
- * bare-root-plus-hash link shape and forward it to /form. Otherwise it
- * leaves index.astro's own static landing markup alone.
+ * bare-root-plus-hash link shape and forward it to /form. The page's
+ * static landing/auth-error markup lives in index.astro; this just picks
+ * which one is visible.
  */
-function main() {
+async function main() {
+  // The bare origin is MSAL's redirectUri, so a loginRedirect response often lands here first.
+  // Finish it and bounce to the pre-redirect URL before doing anything else.
+  if (await completeRedirectReturn()) return;
+
+  const appRoot = document.getElementById("skye-app");
+
   const authError = parseAuthErrorFromHash(window.location.hash);
-  if (authError) {
-    const appRoot = document.getElementById("skye-app");
-    if (appRoot) {
-      appRoot.innerHTML = `
-        <h1>Sign-in didn't complete</h1>
-        <p><strong>${authError.error}</strong>${authError.description ? `: ${authError.description}` : ""}</p>
-        <p>This usually means the Microsoft sign-in/consent flow was cancelled, denied, or interrupted before finishing. Go back to the page you came from and try again.</p>
-      `;
-    }
+  if (authError && appRoot) {
+    const panel = showState(appRoot, "state-auth-error");
+    fillSlot(panel, "error", authError.error);
+    fillSlot(panel, "description", authError.description ? `: ${authError.description}` : "");
     return;
   }
 
@@ -31,4 +35,4 @@ function main() {
   }
 }
 
-main();
+main().catch((err) => console.error("entry-index failed:", err));

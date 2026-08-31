@@ -1,11 +1,14 @@
 # SKYE
 
 ## Reece TODO:
-  - [ ] Make astro pages more state-obvious and get some of the markup out of ts files
-  - [ ] Replace default common tenant behaviour with trying to get tenant id from auth
+  - [ ] Switcher is super slow.
+  - [ ] Identify areas that JS could be replaced by CSS
+  - [x] Make astro pages more state-obvious and get some of the markup out of ts files
   - [ ] Builder is still jank with pages, conditional visibility, what you're editing, etc.
   - [ ] Replace some of these things with components
-
+  - [ ] Security check
+  - [ ] Graph Attributes
+ 
 Client-side forms and views for SharePoint, driven by JSON config files
 authored in a `skye_data/` directory on the SharePoint site itself. Built to
 prioritize ease-of-editing for non-developers and structural consistency

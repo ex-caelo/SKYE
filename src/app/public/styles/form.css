@@ -2,6 +2,10 @@
 
 body { font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; }
 
+/* Pages ship every state in the markup and toggle it with `hidden` (see lib/ui/pageState.ts) —
+   make sure nothing overrides that back to visible. */
+[hidden] { display: none !important; }
+
 .skye-form__tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid #ddd; }
 .skye-form__tabs button { padding: 0.5rem 1rem; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; }
 .skye-form__tab--active { border-bottom-color: #2563eb; font-weight: 600; }
@@ -55,6 +59,8 @@ input[type="checkbox"].skye-switch:checked::before { transform: translateX(1.1re
 
 /* --- new components: minimal, functional styling only --- */
 
+/* status regions are <output> (implicit role=status) — make them block-level like the old <div>s */
+.skye-form__status, .skye-add-site__status, .skye-create-assets__status { display: block; }
 .skye-form__status[data-level="error"] { color: #b91c1c; }
 .skye-form__status[data-level="warning"] { color: #b45309; }
 .skye-form__status[data-level="success"] { color: #15803d; }
@@ -82,6 +88,31 @@ input[type="checkbox"].skye-switch:checked::before { transform: translateX(1.1re
 .skye-site-switcher ul { list-style: none; padding: 0; }
 .skye-site-switcher li { margin-bottom: 0.5rem; }
 .skye-site-switcher button { padding: 0.5rem 1rem; width: 100%; text-align: left; }
+.skye-picker-kind { color: #666; font-size: 0.8rem; margin-left: 0.4rem; }
+.skye-picker-create { margin-top: 1rem; padding: 0.5rem 1rem; }
+
+/* "Set up SKYE on another site" panel */
+.skye-add-site { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #ddd; }
+.skye-add-site h3 { font-size: 1rem; margin-bottom: 0.25rem; }
+.skye-add-site p { font-size: 0.85rem; color: #666; margin: 0 0 0.5rem; }
+.skye-add-site__form { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.skye-add-site__input { flex: 1 1 20rem; padding: 0.45rem 0.6rem; }
+.skye-add-site__button { padding: 0.45rem 1rem; }
+.skye-add-site__status { font-size: 0.85rem; min-height: 1.2em; margin-top: 0.5rem; }
+.skye-add-site__status[data-level="error"] { color: #b91c1c; }
+.skye-add-site__status[data-level="success"] { color: #15803d; }
+
+/* "Manage permissions" step, shown after a new site is set up */
+.skye-permissions-step p, .skye-create-assets p { max-width: 42rem; }
+.skye-permissions-step__link { display: inline-block; margin: 0.5rem 0 1rem; font-weight: 600; }
+.skye-permissions-step__done { display: block; padding: 0.5rem 1.25rem; }
+
+/* "Create Site Assets first" step */
+.skye-create-assets__link { display: inline-block; margin: 0.5rem 0 1rem; font-weight: 600; }
+.skye-create-assets__row { display: flex; gap: 0.5rem; list-style: none; margin: 0; padding: 0; }
+.skye-create-assets__row button { padding: 0.45rem 1rem; }
+.skye-create-assets__status { font-size: 0.85rem; min-height: 1.2em; margin-top: 0.5rem; }
+.skye-create-assets__status[data-level="error"] { color: #b91c1c; }
 
 /* diag.astro's results table — reuses the same data-level color convention as .skye-form__status */
 table { border-collapse: collapse; width: 100%; margin-top: 1.5rem; font-size: 0.9rem; }

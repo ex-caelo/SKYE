@@ -10,6 +10,8 @@ export interface GraphListColumn {
   displayName: string;
   columnType: "text" | "note" | "number" | "currency" | "boolean" | "dateTime" | "choice" | "lookup" | "personOrGroup" | "hyperlinkOrPicture";
   required?: boolean;
+  /** True for computed/system columns (Created, Modified, …) — a form can't write these, so the builder skips them when binding fields or checking required-column coverage. */
+  readOnly?: boolean;
   /** Populated for columnType "choice". */
   choices?: string[];
 }
@@ -75,6 +77,15 @@ export interface SkyeViewSummary {
   title: string;
 }
 
+/** One list on a site — backs the builder's "start a new form" list picker (pick a list instead of pasting its GUID). */
+export interface SkyeListSummary {
+  /** The list id (GUID) — what a form config's `list.id` needs. */
+  id: string;
+  displayName: string;
+  /** The list's SharePoint URL when Graph returns one — a secondary hint in the picker. */
+  webUrl?: string;
+}
+
 /** Raw bytes of a list item's image/file field, for `skye.image()` — the host base64-encodes this into a `data:` URI. */
 export interface ListItemImage {
   contentType: string;
@@ -119,6 +130,34 @@ export interface SiteResult {
   webUrl: string;
 }
 
+/**
+ * Thrown by installSkyeSiteConfig. `kind`:
+ *  - "forbidden" — a 403: the user lacks permission to add files here, or
+ *    SKYE's `Sites.Selected` grant doesn't cover this site.
+ *  - "siteAssetsMissing" — the site has no Site Assets library yet. SKYE
+ *    stores its data there and can't create the library itself (that needs
+ *    a `manage` grant); the user creates it in SharePoint, then retries.
+ *  - "unknown" — anything else.
+ */
+export class SkyeInstallError extends Error {
+  kind: "forbidden" | "siteAssetsMissing" | "unknown";
+  constructor(kind: "forbidden" | "siteAssetsMissing" | "unknown", message: string) {
+    super(message);
+    this.name = "SkyeInstallError";
+    this.kind = kind;
+  }
+}
+
+/** What installSkyeSiteConfig returns on success — enough to link the user to the right permission settings. */
+export interface SkyeInstallResult {
+  /** The list GUID of the Site Assets library (whose `skye_data` folder now holds SKYE's data). Null if it couldn't be resolved. */
+  libraryListId: string | null;
+  /** The list-item id of the `skye_data` folder itself, so the "manage permissions" link can target that folder (a LISTITEM) rather than the whole library. Null if it couldn't be resolved. */
+  skyeDataItemId: string | null;
+  /** A human name for the library, for the UI copy (always "Site Assets"). */
+  libraryName: string;
+}
+
 /** One entry under a site's skye_data/forms/ directory — backs the switcher's "pick a form" step. */
 export interface SkyeFormSummary {
   formId: string;
@@ -149,6 +188,16 @@ export interface UploadedFile {
 
 export interface GraphClient {
   getListColumns(siteId: string, listId: string): Promise<GraphListColumn[]>;
+
+  /**
+   * Enumerates a site's user-facing lists (hidden system lists — catalogs,
+   * Form Templates, Site Assets, etc. — are skipped) for the builder's
+   * "start a new form" list picker, so a form author selects the target
+   * list instead of pasting its GUID. This is list METADATA only — a small,
+   * bounded per-site collection — not list items, so the "never fetch a
+   * full list client-side" rule (which is about item data) doesn't apply.
+   */
+  listSiteLists(siteId: string): Promise<SkyeListSummary[]>;
   getListItem(siteId: string, listId: string, itemId: string, select?: string[]): Promise<GraphListItem>;
   createListItem(siteId: string, listId: string, fields: Record<string, unknown>): Promise<GraphListItem>;
   /** `ifMatchEtag` enables optimistic concurrency — omit only for a first-time create-then-immediately-edit flow. Throws EtagConflictError on mismatch. */
@@ -211,6 +260,47 @@ export interface GraphClient {
    * by client-side filtering after the fact.
    */
   searchSitesWithSkyeData(): Promise<SiteResult[]>;
+
+  /**
+   * Resolves a SharePoint site URL (e.g.
+   * `https://contoso.sharepoint.com/sites/Team`) to a site via Graph's
+   * hostname-path addressing. Returns null if it can't be found or the
+   * caller can't access it. Backs the switcher's "set up SKYE on another
+   * site" flow — under `Sites.Selected` the tenant-wide search above only
+   * ever surfaces already-configured sites, so a brand-new site has to be
+   * named explicitly.
+   */
+  resolveSiteByUrl(siteUrl: string): Promise<SiteResult | null>;
+
+  /** True if the site's **Site Assets** library has `skye_data/config/skye.config.json`. */
+  hasSkyeConfig(siteId: string): Promise<boolean>;
+
+  /**
+   * Whether the signed-in user can WRITE into this site's `skye_data`
+   * folder — i.e. could create a new form config there. Graph exposes no
+   * reliable read-only signal for a user's effective permission on a folder
+   * (the `permissions` collection needs manage-permissions rights just to
+   * read, so a plain contributor would get a false negative), so this is a
+   * functional probe: upload a tiny marker file and delete it again. Any
+   * failure — a 403, no Site Assets library, anything else — resolves to
+   * `false`; the only callers are UI affordances (the switcher's "Create
+   * New Form Config" button, the `/builder` access gate) where a wrong
+   * "yes" would just dead-end at the builder's Save.
+   */
+  canWriteSkyeData(siteId: string): Promise<boolean>;
+
+  /**
+   * Sets SKYE up on a site that doesn't have it yet: writes
+   * `skye_data/config/skye.config.json` (+ empty `forms/`/`views/` folders)
+   * into the site's **Site Assets** library — deliberately not the default
+   * "Documents" library, but an existing one so it needs only the `write`
+   * grant (SKYE can't create a library). Returns the Site Assets list id
+   * and the `skye_data` folder's item id, for the "manage permissions"
+   * link. Throws SkyeInstallError: kind "forbidden" on a 403, or
+   * "siteAssetsMissing" if the site has no Site Assets library (the caller
+   * then shows a "create it in SharePoint, then retry" step).
+   */
+  installSkyeSiteConfig(siteId: string): Promise<SkyeInstallResult>;
 
   /**
    * Lists the forms configured on an already-chosen site — the subfolders

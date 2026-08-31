@@ -8,8 +8,12 @@ import { registerElements } from "../elements/registerElements.js";
 import { submitForm } from "../lib/submit/submitForm.js";
 import { scriptActions } from "../actions/registry.js";
 import { canEditFormConfig } from "../lib/builder/permissions.js";
+import { getCachedTenantId } from "../lib/auth/tenantResolver.js";
+import { completeRedirectReturn } from "../lib/auth/redirectReturn.js";
 import { customValidators } from "../validation/customValidators.js";
 import { showConfirmDialog } from "../lib/ui/confirmDialog.js";
+import { showState, el } from "../lib/ui/pageState.js";
+import { ensureInvokerCommands } from "../lib/ui/invokers.js";
 
 /**
  * Entry point loaded by pages/form.astro. Reads the URL, resolves the
@@ -44,6 +48,11 @@ import { showConfirmDialog } from "../lib/ui/confirmDialog.js";
  *    permission to edit this site's form configs (lib/builder/permissions.ts).
  */
 async function main() {
+  // Landing back from an MSAL loginRedirect? Finish it and return to the pre-redirect URL
+  // (which still carries siteId/applicationId/tenantId + the formId hash) first.
+  if (await completeRedirectReturn()) return;
+
+  await ensureInvokerCommands();
   registerElements();
 
   const appRoot = document.getElementById("skye-app");
@@ -59,8 +68,13 @@ async function main() {
     return;
   }
 
-  const graph = createGraphClient(route.applicationId, route.tenantId);
-  const graphFetch = createGraphFetch(route.applicationId, route.tenantId);
+  // Tenant precedence: URL → PUBLIC_DEFAULT_TENANT_ID → a tenant id a
+  // previous sign-in on this browser cached. If none, auth falls back to
+  // /common and (for a single-tenant app registration) self-heals via
+  // tenant discovery — see lib/auth/tenantResolver.ts.
+  const tenantId = route.tenantId ?? import.meta.env.PUBLIC_DEFAULT_TENANT_ID ?? getCachedTenantId(route.applicationId);
+  const graph = createGraphClient(route.applicationId, tenantId);
+  const graphFetch = createGraphFetch(route.applicationId, tenantId);
 
   // Kicked off in parallel with the config load below, not awaited until after the form itself
   // renders — this is purely a "should the Edit link show up" check and shouldn't add latency to
@@ -101,16 +115,17 @@ async function main() {
   }
 
   const rendered = renderForm(merged, document, { customValidators });
-  appRoot.innerHTML = "";
+
+  // The page ships all its states in form.astro; reveal the form screen and fill its slots.
+  const screen = showState(appRoot, "screen-form");
 
   if (route.draftId) {
-    const banner = document.createElement("div");
-    banner.className = "skye-form__draft-banner";
+    const banner = screen.querySelector<HTMLElement>('[data-slot="draft-banner"]')!;
     banner.textContent = `You're previewing a draft ("${route.draftId}") of this form — this is not the live version.`;
-    appRoot.appendChild(banner);
+    banner.hidden = false;
   }
 
-  appRoot.appendChild(rendered.root);
+  screen.querySelector<HTMLElement>('[data-slot="form-mount"]')!.appendChild(rendered.root);
 
   // --- search-picker wiring: peoplePicker/lookupPicker dispatch these events (see elements/registerElements.ts); ---
   // --- this is the one place in the app that actually knows about the Graph client, keeping the elements themselves Graph-agnostic. ---
@@ -127,10 +142,7 @@ async function main() {
     (e.target as unknown as { setResults: (r: unknown[]) => void }).setResults(results);
   });
 
-  const statusEl = document.createElement("div");
-  statusEl.className = "skye-form__status";
-  statusEl.setAttribute("role", "status");
-  rendered.root.appendChild(statusEl);
+  const statusEl = el<HTMLElement>(screen, "status");
 
   // "Edit in Builder" — only for someone who can actually edit this site's form configs (see
   // lib/builder/permissions.ts). Shown regardless of mode (create/edit/view) since it's always
@@ -138,13 +150,12 @@ async function main() {
   if (!route.draftId) {
     canEditPromise.then((canEdit) => {
       if (!canEdit) return;
-      const editLink = document.createElement("a");
-      editLink.className = "skye-form__edit-link";
+      const editLink = el<HTMLAnchorElement>(screen, "edit-link");
       const params = new URLSearchParams({ siteId: route.siteId, applicationId: route.applicationId });
-      if (route.tenantId) params.set("tenantId", route.tenantId);
+      if (tenantId) params.set("tenantId", tenantId);
       editLink.href = `/builder?${params.toString()}#${route.formId}`;
       editLink.textContent = "Edit in Builder";
-      rendered.root.insertBefore(editLink, rendered.root.firstChild);
+      editLink.hidden = false;
     });
   }
 
@@ -231,5 +242,10 @@ async function main() {
 main().catch((err) => {
   console.error("entry-form failed:", err);
   const appRoot = document.getElementById("skye-app");
-  if (appRoot) appRoot.innerHTML = `<p>Something went wrong loading this form. Check the console for details.</p>`;
+  if (!appRoot) return;
+  try {
+    showState(appRoot, "state-error");
+  } catch {
+    appRoot.textContent = "Something went wrong loading this form. Check the console for details.";
+  }
 });

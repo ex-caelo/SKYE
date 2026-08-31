@@ -24,6 +24,9 @@
 
 * { box-sizing: border-box; }
 
+/* The /view page ships its states in markup and toggles them with `hidden` (lib/ui/pageState.ts). */
+[hidden] { display: none !important; }
+
 body {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   margin: 0;

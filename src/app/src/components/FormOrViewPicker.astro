@@ -1,0 +1,19 @@
+---
+/**
+ * "Choose a form or view" step — /switcher, when a site is known but no
+ * specific form/view is. Rows (each tagged form/view) and the optional
+ * "Create New Form Config" link are filled/toggled at runtime by
+ * populateFormOrViewPicker() (src/lib/routing/siteSwitcher.ts).
+ */
+---
+
+<section class="skye-site-switcher" data-state id="step-form-or-view-picker" hidden>
+  <h2>Choose a form or view</h2>
+  <p data-slot="intro">These are the forms and views configured on this site:</p>
+  <p data-slot="empty" hidden>No SKYE forms or views were found on this site.</p>
+  <ul data-slot="list"></ul>
+  <template data-tpl="row">
+    <li><button type="button"><span class="skye-picker-label"></span><span class="skye-picker-kind"></span></button></li>
+  </template>
+  <a class="skye-picker-create" data-el="create" hidden>Create New Form Config</a>
+</section>

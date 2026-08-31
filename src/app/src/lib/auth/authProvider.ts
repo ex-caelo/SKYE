@@ -1,30 +1,55 @@
-import { PublicClientApplication, InteractionRequiredAuthError } from "@azure/msal-browser";
+import { PublicClientApplication, InteractionRequiredAuthError, type AuthenticationResult } from "@azure/msal-browser";
 import type { AuthenticationProvider } from "@microsoft/microsoft-graph-client";
+import {
+  backfillTenantIdInUrl,
+  cacheTenantId,
+  clearCachedTenantId,
+  getCachedTenantId,
+  isCommonEndpointUnsupported,
+  resolveTenantInteractively,
+  TENANT_GUID_RE,
+} from "./tenantResolver.js";
+import { rememberRedirectReturn } from "./redirectReturn.js";
 
-// Sites.Selected (not the broader Sites.ReadWrite.All) is a deliberate choice, confirmed against
-// a real tenant: it's narrower/more secure, but the app has ZERO site access by default — a
-// tenant/SharePoint admin must explicitly grant it access to EACH specific site (via SharePoint
-// Admin Center's "API access" page, if enabled, or a Sites.FullControl.All-privileged
-// POST /sites/{siteId}/permissions Graph call made some other way — SKYE itself has no
-// client-credentials flow to do this call as itself) before any Graph call against that site
-// succeeds, even with this permission's own admin consent already granted. This also means
-// GraphClient.searchSitesWithSkyeData()'s tenant-wide /search/query can only ever surface sites
-// already explicitly granted — it can't discover a brand-new site the way it could under
-// Sites.ReadWrite.All. Flagged, not silently worked around — see TODO §13.
-// Calendars.ReadWrite.Shared and User.ReadBasic.All back the Teams/Outlook plugin actions and the
-// peoplePicker's directory search respectively — all three are requested together in one token,
-// since a Graph access token is scoped to exactly what was requested at acquisition time, not to
-// everything that happens to be admin-consented on the app registration overall.
-// Exported so diag.astro's per-scope probes can test exactly this list, one entry at a time,
-// without duplicating it (and risking drift) in a second place.
+/**
+ * Whether to try the `/common` authority when no tenant id is known,
+ * instead of asking the user for their work email. `/common` only works for
+ * an actually-multi-tenant Azure app registration; a single-tenant one
+ * dead-ends on an AADSTS50194 error page that MSAL can't read back (the
+ * popup just closes as "user_cancelled"), so the default is to ask. A
+ * multi-tenant deployment sets PUBLIC_AUTH_ALLOW_COMMON=1 to opt back in.
+ */
+function commonFallbackAllowed(): boolean {
+  return import.meta.env.PUBLIC_AUTH_ALLOW_COMMON === "1" || import.meta.env.PUBLIC_AUTH_ALLOW_COMMON === "true";
+}
+
+// The scopes requested in every interactive token acquisition. A Graph access token carries
+// EXACTLY the scopes asked for at acquisition — not whatever is admin-consented on the app
+// registration overall — and MSAL requests this whole set in ONE token call, so a single scope
+// that needs ungranted admin consent fails the entire sign-in. This list is therefore kept to
+// scopes CONFIRMED available on the target tenant (see CLAUDE.md's "Real-tenant Graph
+// permissions" section, tested via pages/diag.astro):
 //
-// Calendars.ReadWrite.Shared previously needed to be temporarily commented out here, because a
-// cancelled/blocked interactive prompt for it fell back to a page-navigating redirect that killed
-// the whole diagnostics run (see acquireTokenPopupOnly below — now fixed, so it's safe to test
-// again here rather than skip it). Chat.Create/ChatMessage.Send (teams.createChat/sendMessage) and
-// Mail.Send (outlook.sendEmail) added to actually test the scopes those plugin actions need, not
-// just the ones already known to work.
-export const GRAPH_SCOPES = ["Sites.Selected", "Calendars.ReadWrite.Shared", "User.ReadBasic.All", "Chat.Create", "ChatMessage.Send", "Mail.Send"];
+//   Sites.Selected      - all list/library access. Narrower than Sites.ReadWrite.All on purpose;
+//                         the app has ZERO site access until a SharePoint admin grants it per-site
+//                         (SharePoint Admin Center "API access", or a Sites.FullControl.All
+//                         POST /sites/{id}/permissions made out of band). This also limits
+//                         searchSitesWithSkyeData() to already-granted sites — see TODO §13.
+//   User.ReadBasic.All  - searchPeople / the peoplePicker's directory search.
+//   Chat.Create,
+//   ChatMessage.Send    - teams.createChat / teams.sendMessage.
+//   Mail.Send           - outlook.sendEmail.
+//
+// DELIBERATELY EXCLUDED: Calendars.ReadWrite.Shared (and every other Calendars.* / OnlineMeetings /
+// Tasks scope). Calendars.ReadWrite.Shared is CONFIRMED blocked on the IU tenant (needs admin
+// consent that hasn't been granted); the rest showed user_cancelled in isolation and are treated
+// as unavailable. Including any of them here would break sign-in for everyone. Consequence:
+// teams.scheduleMeeting and outlook.createCalendarEvent fail at runtime — use the documented
+// redirect / deep-link workaround (outlook.buildCalendarEventDeepLink) instead. If IU ever grants
+// a calendar scope, add exactly that one back here (and re-test the combined sign-in).
+//
+// Exported so diag.astro's per-scope probes test exactly this list without a second copy drifting.
+export const GRAPH_SCOPES = ["Sites.Selected", "User.ReadBasic.All", "Chat.Create", "ChatMessage.Send", "Mail.Send"];
 
 // One MSAL instance per (applicationId, tenantId) pair, since the Azure app
 // registration's client ID comes from the URL (?applicationId=) rather than
@@ -54,8 +79,8 @@ function getMsalInstance(applicationId: string, tenantId: string | undefined): P
   return instance;
 }
 
-/** Shared first step for both acquireToken and acquireTokenPopupOnly: initialize, clear any pending redirect state, and try silent acquisition against the first cached account (if any). Returns null (not a throw) when silent acquisition genuinely needs interaction, so callers can fall through to their own interactive strategy — any OTHER error still propagates. */
-async function initAndTrySilent(msal: PublicClientApplication, scopes: string[]): Promise<string | null> {
+/** Shared first step for both acquireToken and acquireTokenPopupOnly: initialize, clear any pending redirect state, and try silent acquisition against the first cached account (if any). Returns the full AuthenticationResult (so the caller can read `tenantId`), or null when silent acquisition genuinely needs interaction — any OTHER error still propagates. */
+async function initAndTrySilent(msal: PublicClientApplication, scopes: string[]): Promise<AuthenticationResult | null> {
   await msal.initialize();
   // Processes (and critically, CLEARS) any pending redirect response left over from a previous
   // loginRedirect fallback. Without this, an interrupted/failed redirect round-trip leaves MSAL's
@@ -63,46 +88,107 @@ async function initAndTrySilent(msal: PublicClientApplication, scopes: string[])
   // subsequent acquireToken call then fails immediately with `interaction_in_progress`, regardless
   // of whether the original admin-consent/site-permission problem is even still an issue. Found via
   // exactly that stuck state during real-tenant debugging — safe/idempotent to call even when
-  // there's no pending redirect (resolves to null immediately).
-  await msal.handleRedirectPromise();
+  // there's no pending redirect (resolves to null immediately). A returned result here is a
+  // completed redirect-flow sign-in, which we DO want to surface so its tenantId gets cached.
+  const redirectResult = await msal.handleRedirectPromise();
+  if (redirectResult) return redirectResult;
 
   const account = msal.getAllAccounts()[0];
   if (!account) return null;
 
   try {
-    const result = await msal.acquireTokenSilent({ scopes, account });
-    return result.accessToken;
+    return await msal.acquireTokenSilent({ scopes, account });
   } catch (err) {
     if (!(err instanceof InteractionRequiredAuthError)) throw err;
     return null; // fall through to interactive acquisition
   }
 }
 
+/** Caches + backfills the tenant id from a successful sign-in, so a bare link resolves instantly next time (see tenantResolver.ts). */
+function rememberTenantFromResult(applicationId: string, result: AuthenticationResult): void {
+  const tid = result.tenantId || result.account?.tenantId;
+  if (tid && TENANT_GUID_RE.test(tid)) {
+    cacheTenantId(applicationId, tid);
+    backfillTenantIdInUrl(tid);
+  }
+}
+
 /**
- * Acquires a Graph token for the given application (and tenant, if the
- * Azure app registration is single-tenant), preferring silent acquisition,
- * then popup (keeps location.hash intact — see TODO §4), and only falling
- * back to a full-page redirect if the popup is blocked. `scopes` defaults
- * to the full app-wide GRAPH_SCOPES set (every real call site — GraphClient,
- * rawGraphFetch — relies on that default and never passes its own); it's
- * only overridden by diag.astro's per-scope probes, to isolate which
- * individual scope actually works vs. the combined request as a whole.
+ * The core acquire flow against ONE authority: silent → popup → redirect.
+ * `tenantId` is always a real tenant id here (never undefined) UNLESS a
+ * multi-tenant deployment opted into `/common` — so the redirect fallback
+ * is only taken when we actually have a tenant (a blocked popup is then the
+ * likely cause and redirect genuinely helps); with no tenant we rethrow so
+ * acquireToken can recover by asking for the work email instead of
+ * dead-ending on an AADSTS50194 error page mid-navigation.
  */
-export async function acquireToken(applicationId: string, tenantId?: string, scopes: string[] = GRAPH_SCOPES): Promise<string> {
+async function acquireWithTenant(applicationId: string, tenantId: string | undefined, scopes: string[]): Promise<string> {
   const msal = getMsalInstance(applicationId, tenantId);
+
   const silent = await initAndTrySilent(msal, scopes);
-  if (silent) return silent;
+  if (silent) {
+    rememberTenantFromResult(applicationId, silent);
+    return silent.accessToken;
+  }
 
   try {
     const result = await msal.loginPopup({ scopes });
+    rememberTenantFromResult(applicationId, result);
     return result.accessToken;
   } catch (popupErr) {
-    // Popup blocked or otherwise failed — fall back to redirect. This unloads the page,
-    // so whatever's driving navigation post-auth needs to restore the hash/state on return.
+    // No real tenant to fall back on -> a /common redirect would just dead-end. Let acquireToken recover.
+    if (!tenantId) throw popupErr;
+    if (isCommonEndpointUnsupported(popupErr)) throw popupErr;
     console.warn("MSAL popup failed, falling back to redirect flow:", popupErr);
-    await msal.loginRedirect({ scopes });
+    // Stash the current URL (+ pass it as `state`) so completeRedirectReturn() can bring the
+    // user back here after AAD returns to the fixed redirect URI without our query string.
+    rememberRedirectReturn();
+    await msal.loginRedirect({ scopes, state: window.location.href });
     // loginRedirect navigates away; nothing after this line runs in this page load.
     throw new Error("Redirecting for authentication.");
+  }
+}
+
+/** True if an error means "the tenant we used was rejected" — worth clearing a stale cache and re-asking. */
+function tenantWasRejected(err: unknown): boolean {
+  if (isCommonEndpointUnsupported(err)) return true;
+  const message = (err as { errorMessage?: string; message?: string })?.errorMessage ?? (err as Error)?.message ?? "";
+  // "tenant not found" / "no such tenant" family.
+  return /AADSTS90002|AADSTS500011|AADSTS90072/.test(message);
+}
+
+/**
+ * Acquires a Graph token for the given application. Tenant precedence:
+ * an explicit `tenantId` (from `?tenantId=` / `PUBLIC_DEFAULT_TENANT_ID`) →
+ * a tenant id a previous sign-in on this browser cached (localStorage) →
+ * then, since a single-tenant Azure app registration CANNOT use `/common`
+ * and its failure isn't cleanly recoverable mid-popup, we ask the user for
+ * their work email and resolve it to a tenant id via Entra's public OIDC
+ * discovery document (see tenantResolver.ts) — caching it and rewriting the
+ * URL to carry `?tenantId=` so it's a one-time step. A genuinely
+ * multi-tenant deployment sets `PUBLIC_AUTH_ALLOW_COMMON=1` to try
+ * `/common` first instead of prompting.
+ *
+ * `` defaults to the full app-wide GRAPH_SCOPES set (every real call
+ * site relies on that default); it's only overridden by diag.astro.
+ */
+export async function acquireToken(applicationId: string, tenantId?: string, scopes: string[] = GRAPH_SCOPES): Promise<string> {
+  let effectiveTenantId = tenantId ?? getCachedTenantId(applicationId);
+
+  // No tenant from anywhere, and this build hasn't opted into /common -> ask up front.
+  if (!effectiveTenantId && !commonFallbackAllowed()) {
+    effectiveTenantId = await resolveTenantInteractively(applicationId);
+  }
+
+  try {
+    return await acquireWithTenant(applicationId, effectiveTenantId, scopes);
+  } catch (err) {
+    if (!tenantWasRejected(err)) throw err;
+    // The tenant we used (a stale cache, a wrong URL param, or /common on a
+    // single-tenant app) was refused — drop it and ask for the work email.
+    clearCachedTenantId(applicationId);
+    const rediscovered = await resolveTenantInteractively(applicationId);
+    return acquireWithTenant(applicationId, rediscovered, scopes);
   }
 }
 
@@ -119,7 +205,7 @@ export async function acquireToken(applicationId: string, tenantId?: string, sco
 export async function acquireTokenPopupOnly(applicationId: string, tenantId: string | undefined, scopes: string[]): Promise<string> {
   const msal = getMsalInstance(applicationId, tenantId);
   const silent = await initAndTrySilent(msal, scopes);
-  if (silent) return silent;
+  if (silent) return silent.accessToken;
 
   const result = await msal.loginPopup({ scopes });
   return result.accessToken;

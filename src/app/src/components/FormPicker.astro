@@ -1,0 +1,17 @@
+---
+/**
+ * "Choose a form" step — used by /builder (step 2) when a site is known
+ * but no form is. Rows are filled at runtime by populateFormPicker()
+ * (src/lib/routing/siteSwitcher.ts). /builder places its "or start a new
+ * form" block in the `<slot />`.
+ */
+---
+
+<section class="skye-site-switcher" data-state id="step-form-picker" hidden>
+  <h2>Choose a form</h2>
+  <p data-slot="intro">These are the forms configured on this site:</p>
+  <p data-slot="empty" hidden>No SKYE forms were found on this site.</p>
+  <ul data-slot="list"></ul>
+  <template data-tpl="row"><li><button type="button"></button></li></template>
+  <slot />
+</section>

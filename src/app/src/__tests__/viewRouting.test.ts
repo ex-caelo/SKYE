@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseViewRoute, buildViewUrl, buildFormUrl, buildViewSwitcherRedirectUrl } from "../lib/routing/router.js";
+import { parseViewRoute, buildViewUrl, buildFormUrl, buildBuilderUrl, buildViewSwitcherRedirectUrl } from "../lib/routing/router.js";
 
 describe("parseViewRoute", () => {
   it("resolves a full /view route", () => {
@@ -30,6 +30,11 @@ describe("parseViewRoute", () => {
 });
 
 describe("view URL builders", () => {
+  it("buildBuilderUrl targets /builder, with an optional formId hash", () => {
+    expect(buildBuilderUrl("s1", "a1", undefined)).toBe("/builder?siteId=s1&applicationId=a1");
+    expect(buildBuilderUrl("s1", "a1", "t1", "event-signup")).toBe("/builder?siteId=s1&applicationId=a1&tenantId=t1#event-signup");
+  });
+
   it("buildViewUrl omits tenantId when absent, includes it when present", () => {
     expect(buildViewUrl("s1", "a1", undefined, "calendar")).toBe("/view?siteId=s1&applicationId=a1#calendar");
     expect(buildViewUrl("s1", "a1", "t1", "calendar")).toBe("/view?siteId=s1&applicationId=a1&tenantId=t1#calendar");

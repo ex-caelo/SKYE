@@ -1,7 +1,7 @@
-// Site-wide SKYE configuration (`skye_data/config/skye.config.json`) as it
-// applies to Custom Views. This file owns the SHAPE of that config, how a
-// base file and its `[permission]` overlays combine, and the "not set up
-// yet" failure mode.
+// Site-wide SKYE configuration (`skye_data/config/skye.config.json`, in the
+// site's Site Assets library) as it applies to Custom Views. This file owns
+// the SHAPE of that config, how a base file and its `[permission]` overlays
+// combine, and the "not set up yet" failure mode.
 //
 // IMPORTANT — this config is a shape/vocabulary guardrail, NOT a permission
 // boundary. Widening `views.allowedLists` does not grant anyone access to a
@@ -46,12 +46,26 @@ export interface SkyeSiteConfig {
 }
 
 /**
- * Thrown when a site has no `skye_data/config/skye.config.json` at all.
+ * The minimal, valid `skye.config.json` written when SKYE is first
+ * installed on a site (see GraphClient.installSkyeSiteConfig). Everything
+ * is an empty allowlist — an owner opens things up from here. `home` is
+ * omitted, so the switcher shows the form/view picker rather than
+ * redirecting anywhere.
+ */
+export const DEFAULT_SITE_CONFIG = {
+  views: { allowedLists: [] as string[] },
+  navigation: { allowedExternalOrigins: [] as string[] },
+  builderEditors: [] as string[],
+};
+
+/**
+ * Thrown when a site's Site Assets library has no
+ * `skye_data/config/skye.config.json` (or no Site Assets library at all).
  * entry-view / entry-switcher catch this and render a plain "SKYE isn't
  * set up yet" page rather than a stack trace.
  */
 export class SkyeNotConfiguredError extends Error {
-  constructor(message = "This site has no skye_data/config/skye.config.json — SKYE isn't set up here yet.") {
+  constructor(message = "This site's Site Assets library has no skye_data/config/skye.config.json — SKYE isn't set up here yet.") {
     super(message);
     this.name = "SkyeNotConfiguredError";
   }

@@ -1,23 +1,26 @@
 /**
- * A small reusable "here's a state, not a form" panel — used for the
- * permission-denied screen (see lib/builder/permissions.ts) and any other
- * plain informational/error state a page needs to show instead of its
- * normal content. Same rationale as confirmDialog.ts for staying a plain
- * TS/DOM module rather than an Astro component: this is a static-output
- * SPA, so which message (if any) to show is only known at runtime.
+ * Drives the shared message panel (components/MessagePanel.astro) — a
+ * full-page "here's a state, not the normal content" screen, used for the
+ * permission-denied screen (lib/builder/permissions.ts) and any other
+ * plain informational/error state a page shows instead of its content.
+ *
+ * The markup now lives in the `.astro` component (reviewable HTML, one
+ * instance per page that needs it); this function only reveals it and
+ * fills it in. `root` is the page's `<main id="skye-app">` (or any
+ * ancestor of both the panel and the other `[data-state]` sections).
  */
-export function renderMessagePanel(kind: "error" | "info" | "warning", title: string, body: string, document: Document): HTMLElement {
-  const panel = document.createElement("div");
-  panel.className = "skye-message-panel";
+import { showState, fillSlot } from "./pageState.js";
+import { MESSAGE_PANEL } from "./domHooks.js";
+
+export function showMessagePanel(
+  root: ParentNode,
+  kind: "error" | "info" | "warning",
+  title: string,
+  body: string
+): HTMLElement {
+  const panel = showState(root, MESSAGE_PANEL.id);
   panel.dataset.level = kind;
-
-  const heading = document.createElement("h1");
-  heading.textContent = title;
-  panel.appendChild(heading);
-
-  const bodyEl = document.createElement("p");
-  bodyEl.textContent = body;
-  panel.appendChild(bodyEl);
-
+  fillSlot(panel, MESSAGE_PANEL.slotTitle, title);
+  fillSlot(panel, MESSAGE_PANEL.slotBody, body);
   return panel;
 }

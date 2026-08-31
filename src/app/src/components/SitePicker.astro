@@ -1,0 +1,24 @@
+---
+/**
+ * "Choose a site" step — used by both /switcher (step 1) and /builder
+ * (step 1). The list is populated at runtime by populateSitePicker()
+ * (src/lib/routing/siteSwitcher.ts) from the sites Graph search returned;
+ * the `<slot />` lets /switcher drop its "set up SKYE on another site"
+ * panel inside this same screen (/builder leaves it empty).
+ */
+---
+
+<section class="skye-site-switcher" data-state id="step-site-picker" hidden>
+  <h2>Choose a site</h2>
+  <p data-slot="intro">
+    Sites where SKYE is set up. Don't see yours? A recent setup can take a
+    few minutes to appear — use the box below.
+  </p>
+  <p data-slot="empty" hidden>
+    No sites with SKYE turned up. If you just set one up, it can take a few
+    minutes to appear — use the box below to open it directly.
+  </p>
+  <ul data-slot="list"></ul>
+  <template data-tpl="row"><li><button type="button"></button></li></template>
+  <slot />
+</section>

@@ -11,12 +11,15 @@ import type {
   SkyeFormConfigFile,
   SkyeFormDraftSummary,
   SkyeFormSummary,
+  SkyeInstallResult,
+  SkyeListSummary,
   SkyeSiteConfigFile,
   SkyeViewFiles,
   SkyeViewSummary,
   UploadedFile,
 } from "../graph/types.js";
-import { EtagConflictError } from "../graph/types.js";
+import { EtagConflictError, SkyeInstallError } from "../graph/types.js";
+import { parsePastedSiteUrl, siteRootUrl } from "../graph/siteUrl.js";
 import listColumnsFixture from "./fixtures/list-columns.json" with { type: "json" };
 import baseFormConfigFixture from "./fixtures/base-form-config.json" with { type: "json" };
 import adminOverlayFixture from "./fixtures/admin-overlay-form-config.json" with { type: "json" };
@@ -36,6 +39,26 @@ import probesJs from "./fixtures/views/security-probes/view.js?raw";
 /** In-memory simulated document library, keyed by (driveId, path) — good enough to exercise upload logic without a real drive. */
 const driveStore = new Map<string, { driveItemId: string; webUrl: string }>();
 let nextDriveItemId = 1;
+
+/**
+ * Sites SKYE was "installed" on via the switcher's set-up-a-new-site flow,
+ * keyed by siteId then by the literal "site". Mirrored to sessionStorage
+ * (same as the form-config/draft stores) so an install done on `/switcher`
+ * is still visible after the real page navigation to the new site.
+ */
+const installedSites = loadPersistedStore("skye-mock-installed-sites");
+
+function markSiteInstalled(site: SiteResult): void {
+  installedSites.set(site.siteId, new Map<string, unknown>([["site", site]]));
+  persistStore("skye-mock-installed-sites", installedSites);
+}
+
+/** Site ids whose "Site Assets missing" simulation has been tripped once — the next attempt then "finds" it (mimics the user creating it between retries). */
+const siteAssetsCreated = new Set<string>();
+
+function installedSiteList(): SiteResult[] {
+  return [...installedSites.values()].map((m) => m.get("site") as SiteResult).filter(Boolean);
+}
 
 /**
  * Loads/persists a two-level Map (outer key -> inner key -> JSON value) to
@@ -268,6 +291,18 @@ export class MockGraphClient implements GraphClient {
     return delay(listColumnsFixture as GraphListColumn[]);
   }
 
+  async listSiteLists(_siteId: string): Promise<SkyeListSummary[]> {
+    // A stable, small set mirroring the ids the form/view fixtures use, so the builder's
+    // "start a new form" list picker has real options to choose from against the mock.
+    const lists: SkyeListSummary[] = [
+      { id: "66742a26-e579-4314-88b4-f6b62bf36458", displayName: "Event Sign-ups" },
+      { id: "guests-list", displayName: "Guest List" },
+      { id: "list1", displayName: "General List" },
+      ...Object.keys(viewLists).map((name) => ({ id: name, displayName: name })),
+    ];
+    return delay(lists.sort((a, b) => a.displayName.localeCompare(b.displayName)));
+  }
+
   async getListItem(siteId: string, listId: string, itemId: string): Promise<GraphListItem> {
     const item = getStore(siteId, listId).get(itemId);
     if (!item) throw new Error(`MockGraphClient: no fixture item with id "${itemId}" in list "${listId}".`);
@@ -398,10 +433,72 @@ export class MockGraphClient implements GraphClient {
   }
 
   async searchSitesWithSkyeData(): Promise<SiteResult[]> {
-    return delay(sitesFixture as SiteResult[]);
+    return delay([...(sitesFixture as SiteResult[]), ...installedSiteList()]);
+  }
+
+  async resolveSiteByUrl(pasted: string): Promise<SiteResult | null> {
+    const ref = parsePastedSiteUrl(pasted);
+    if (!ref) return delay(null);
+
+    // A Teams link resolves to a synthetic per-group site so the flow is demoable in mock mode.
+    if (ref.kind === "groupId") {
+      const short = ref.groupId.slice(0, 8);
+      return delay({ siteId: `mock-site-team-${short}`, displayName: `Team ${short}`, webUrl: `https://example.sharepoint.com/sites/team-${short}` });
+    }
+
+    const rootUrl = siteRootUrl(ref);
+    // A URL pointing at a "notfound"/"missing" site simulates one the mock can't reach.
+    if (/notfound|missing/i.test(rootUrl)) return delay(null);
+
+    const known = (sitesFixture as SiteResult[]).find((s) => s.webUrl.replace(/\/$/, "") === rootUrl);
+    if (known) return delay(known);
+
+    const slug = ref.sitePath ? ref.sitePath.split("/").pop()! : ref.hostname;
+    return delay({ siteId: `mock-site-${slug}`, displayName: slug.replace(/[-_]/g, " "), webUrl: rootUrl });
+  }
+
+  async hasSkyeConfig(siteId: string): Promise<boolean> {
+    // Fixture sites always have config; a freshly-resolved "new" site doesn't until installed.
+    if ((sitesFixture as SiteResult[]).some((s) => s.siteId === siteId)) return delay(true);
+    return delay(installedSites.has(siteId));
+  }
+
+  async canWriteSkyeData(siteId: string): Promise<boolean> {
+    // A siteId hinting "forbidden"/"readonly" simulates a read-only user; everything else can write,
+    // as long as SKYE is actually set up there (fixture site, or one installed this session).
+    if (/forbidden|readonly/i.test(siteId)) return delay(false);
+    return delay(await this.hasSkyeConfig(siteId));
+  }
+
+  async installSkyeSiteConfig(siteId: string): Promise<SkyeInstallResult> {
+    if (/forbidden|readonly/i.test(siteId)) {
+      throw new SkyeInstallError("forbidden", "Mock: this site simulates a permissions failure.");
+    }
+    // A siteId containing "noassets" has no Site Assets library — the FIRST attempt fails,
+    // subsequent ones succeed (as if the user created it between retries).
+    if (/noassets/i.test(siteId) && !siteAssetsCreated.has(siteId)) {
+      siteAssetsCreated.add(siteId);
+      throw new SkyeInstallError("siteAssetsMissing", "Mock: this site has no Site Assets library yet. Retry to simulate having created one.");
+    }
+    markSiteInstalled({
+      siteId,
+      displayName: siteId.replace(/^mock-site-/, "").replace(/[-_]/g, " "),
+      webUrl: `https://example.sharepoint.com/sites/${siteId}`,
+    });
+    return delay({ libraryListId: "836137fa-0292-423c-a1f0-8979b64ee621", skyeDataItemId: "9", libraryName: "Site Assets" });
   }
 
   async listSkyeForms(siteId: string): Promise<SkyeFormSummary[]> {
+    // A site freshly set up via the switcher starts empty — nothing seeded.
+    if (installedSites.has(siteId)) {
+      const summaries = new Map<string, string>();
+      for (const [key, forms] of formConfigStore) {
+        if (!key.startsWith(`${siteId}::`)) continue;
+        const base = forms.get("base") as { title?: string } | undefined;
+        if (base) summaries.set(key.slice(siteId.length + 2), base.title ?? key.slice(siteId.length + 2));
+      }
+      return delay([...summaries.entries()].map(([formId, title]) => ({ formId, title })));
+    }
     // Forms saved into the in-memory store during this mock session (including brand-new ones
     // created via /builder) take precedence; "test-event-signup" always shows even before its
     // first read seeds the store, so the switcher/builder can find it from a cold start.
@@ -421,15 +518,21 @@ export class MockGraphClient implements GraphClient {
     return delay(files);
   }
 
-  async getSkyeSiteConfigFiles(_siteId: string): Promise<SkyeSiteConfigFile[]> {
-    // Simulates a user who can see the base config and one admin overlay — drop the second entry to test a non-admin viewer.
+  async getSkyeSiteConfigFiles(siteId: string): Promise<SkyeSiteConfigFile[]> {
+    // A site just set up via the switcher gets only the minimal default config, no overlays.
+    if (installedSites.has(siteId)) {
+      return delay([{ source: "base", config: { views: { allowedLists: [] }, navigation: { allowedExternalOrigins: [] }, builderEditors: [] } }]);
+    }
+    // Otherwise: a user who can see the base config and one admin overlay — drop the second entry to test a non-admin viewer.
     return delay([
       { source: "base", config: skyeConfigFixture },
       { source: "admin", config: skyeConfigAdminFixture },
     ]);
   }
 
-  async listSkyeViews(_siteId: string): Promise<SkyeViewSummary[]> {
+  async listSkyeViews(siteId: string): Promise<SkyeViewSummary[]> {
+    // A site freshly set up via the switcher has no views yet.
+    if (installedSites.has(siteId)) return delay([]);
     return delay([
       { viewId: "calendar", title: "Events calendar" },
       { viewId: "security-probes", title: "Security probes" },

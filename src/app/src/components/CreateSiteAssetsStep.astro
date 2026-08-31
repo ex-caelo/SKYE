@@ -1,0 +1,29 @@
+---
+/**
+ * Shown when a site has no Site Assets library (SKYE stores its data there
+ * and can't create the library itself). Explains it, links to SharePoint's
+ * "add a page" flow (which provisions Site Assets), and offers "Check
+ * again". wireCreateSiteAssetsStep() (src/lib/routing/siteSwitcher.ts)
+ * fills the site name + link, wires the buttons, and returns
+ * { setStatus, setBusy } that entry-switcher.ts's auto-poll drives.
+ */
+---
+
+<section class="skye-site-switcher skye-create-assets" data-state id="step-create-assets" hidden>
+  <h2>One step in SharePoint first</h2>
+  <p>
+    <span data-slot="site-name"></span> doesn't have a Site Assets library
+    yet — that's where SKYE keeps its data, and SKYE can't create it for
+    you. The quickest way: open a new page in SharePoint and save it (even
+    as a draft) — that creates Site Assets automatically. Then come back
+    and check again.
+  </p>
+  <a class="skye-create-assets__link" data-el="create-link" target="_blank" rel="noopener noreferrer">
+    Add a page in SharePoint ↗
+  </a>
+  <menu class="skye-create-assets__row">
+    <li><button class="skye-create-assets__cancel" data-el="cancel" type="button">Cancel</button></li>
+    <li><button class="skye-create-assets__retry" data-el="retry" type="button">Check again</button></li>
+  </menu>
+  <output class="skye-create-assets__status" data-el="status"></output>
+</section>

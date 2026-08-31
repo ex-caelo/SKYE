@@ -46,8 +46,16 @@ Two packages:
   discovered gaps".) `tenantId` is optional — omit it for an actually
   multi-tenant Azure app registration (uses the `/common` authority); a
   single-tenant registration REJECTS `/common` outright (`AADSTS50194`,
-  confirmed against a real tenant) and needs its tenant id here, or via a
-  deploy-configured `PUBLIC_DEFAULT_TENANT_ID`.
+  confirmed against a real tenant) and needs its tenant id. Resolution
+  order (`lib/auth/tenantResolver.ts`): `?tenantId=` → `PUBLIC_DEFAULT_TENANT_ID`
+  → a tenant id a previous sign-in on this browser cached in `localStorage`
+  → `/common`. If `/common` is refused (single-tenant, nothing configured),
+  the app asks the user for their work email, resolves it to a tenant id
+  via Entra's public OIDC discovery document, caches it, rewrites the URL
+  to carry `?tenantId=`, and retries — so a bare single-tenant link
+  "self-heals" with no deploy-time env var. After any successful sign-in
+  the real tenant id (from the MSAL result) is cached + backfilled the
+  same way.
 - **Multi-page, still 100% client-side (no SSR)**: `/form`, `/switcher`,
   `/` (landing), and `/404` are separate real `.astro` files/paths — plain
   static output, each shipping only the client JS it needs (confirmed via

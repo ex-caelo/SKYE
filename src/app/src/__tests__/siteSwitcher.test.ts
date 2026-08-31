@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
-import { renderSiteSwitcher, renderFormPicker } from "../lib/routing/siteSwitcher.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { populateSitePicker, populateFormPicker } from "../lib/routing/siteSwitcher.js";
+import { mountComponents } from "./helpers/astroFixture.js";
 import type { SiteResult, SkyeFormSummary } from "../lib/graph/types.js";
 
 const sites: SiteResult[] = [
@@ -12,35 +13,46 @@ const forms: SkyeFormSummary[] = [
   { formId: "budget-request", title: "Budget Request" },
 ];
 
-describe("renderSiteSwitcher", () => {
-  it("renders one entry per site", () => {
-    const el = renderSiteSwitcher(sites, vi.fn(), document);
-    const buttons = el.querySelectorAll("li button");
+afterEach(() => {
+  document.body.innerHTML = "";
+});
+
+describe("populateSitePicker", () => {
+  it("fills the SitePicker skeleton with one row per site", () => {
+    const section = mountComponents("SitePicker").querySelector<HTMLElement>("#step-site-picker")!;
+    populateSitePicker(section, sites, vi.fn());
+    const buttons = section.querySelectorAll("li button");
     expect(buttons).toHaveLength(2);
     expect(buttons[0].textContent).toBe("Site A");
     expect(buttons[1].textContent).toBe("Site B");
+    expect(section.querySelector<HTMLElement>('[data-slot="empty"]')!.hidden).toBe(true);
   });
 
   it("calls onSelect with the chosen site when clicked", () => {
     const onSelect = vi.fn();
-    const el = renderSiteSwitcher(sites, onSelect, document);
-    const buttons = el.querySelectorAll("li button");
-    (buttons[1] as HTMLButtonElement).click();
+    const section = mountComponents("SitePicker").querySelector<HTMLElement>("#step-site-picker")!;
+    populateSitePicker(section, sites, onSelect);
+    (section.querySelectorAll("li button")[1] as HTMLButtonElement).click();
     expect(onSelect).toHaveBeenCalledWith(sites[1]);
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
-  it("shows an empty-state message and no list when there are no sites", () => {
-    const el = renderSiteSwitcher([], vi.fn(), document);
-    expect(el.querySelector("ul")).toBeNull();
-    expect(el.textContent).toContain("No SharePoint sites with a SKYE configuration were found.");
+  it("shows the empty-state message and no rows when there are no sites", () => {
+    const section = mountComponents("SitePicker").querySelector<HTMLElement>("#step-site-picker")!;
+    populateSitePicker(section, [], vi.fn());
+    expect(section.querySelectorAll("li button")).toHaveLength(0);
+    const empty = section.querySelector<HTMLElement>('[data-slot="empty"]')!;
+    expect(empty.hidden).toBe(false);
+    expect(empty.textContent).toContain("No sites with SKYE turned up.");
+    expect(section.querySelector<HTMLElement>('[data-slot="list"]')!.hidden).toBe(true);
   });
 });
 
-describe("renderFormPicker", () => {
-  it("renders one entry per form, labeled by title", () => {
-    const el = renderFormPicker(forms, vi.fn(), document);
-    const buttons = el.querySelectorAll("li button");
+describe("populateFormPicker", () => {
+  it("renders one row per form, labeled by title", () => {
+    const section = mountComponents("FormPicker").querySelector<HTMLElement>("#step-form-picker")!;
+    populateFormPicker(section, forms, vi.fn());
+    const buttons = section.querySelectorAll("li button");
     expect(buttons).toHaveLength(2);
     expect(buttons[0].textContent).toBe("Event Sign-up");
     expect(buttons[1].textContent).toBe("Budget Request");
@@ -48,16 +60,17 @@ describe("renderFormPicker", () => {
 
   it("calls onSelect with the chosen form when clicked", () => {
     const onSelect = vi.fn();
-    const el = renderFormPicker(forms, onSelect, document);
-    const buttons = el.querySelectorAll("li button");
-    (buttons[1] as HTMLButtonElement).click();
+    const section = mountComponents("FormPicker").querySelector<HTMLElement>("#step-form-picker")!;
+    populateFormPicker(section, forms, onSelect);
+    (section.querySelectorAll("li button")[1] as HTMLButtonElement).click();
     expect(onSelect).toHaveBeenCalledWith(forms[1]);
-    expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
-  it("shows an empty-state message and no list when there are no forms", () => {
-    const el = renderFormPicker([], vi.fn(), document);
-    expect(el.querySelector("ul")).toBeNull();
-    expect(el.textContent).toContain("No SKYE forms were found on this site.");
+  it("shows the empty-state message when there are no forms", () => {
+    const section = mountComponents("FormPicker").querySelector<HTMLElement>("#step-form-picker")!;
+    populateFormPicker(section, [], vi.fn());
+    const empty = section.querySelector<HTMLElement>('[data-slot="empty"]')!;
+    expect(empty.hidden).toBe(false);
+    expect(empty.textContent).toContain("No SKYE forms were found on this site.");
   });
 });

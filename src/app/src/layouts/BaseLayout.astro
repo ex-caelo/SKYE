@@ -1,0 +1,31 @@
+---
+/**
+ * The shared document shell for every SKYE page — the `<!doctype>`, head
+ * boilerplate, stylesheet links and the `<main id="skye-app">` mount point
+ * the entry scripts look for. Pages provide a `title`, any extra
+ * stylesheet hrefs, optional extra `<head>` content (the `head` slot), and
+ * their state markup as the default slot.
+ */
+interface Props {
+  title: string;
+  /** Stylesheet hrefs to link, in order. Defaults to just the shared form styles. */
+  styles?: string[];
+}
+const { title, styles = ["/styles/form.css"] } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    {styles.map((href) => <link rel="stylesheet" href={href} />)}
+    <slot name="head" />
+  </head>
+  <body>
+    <main id="skye-app">
+      <slot />
+    </main>
+  </body>
+</html>

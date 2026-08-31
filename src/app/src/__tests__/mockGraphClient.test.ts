@@ -9,6 +9,17 @@ describe("MockGraphClient", () => {
     expect(columns.find((c) => c.name === "Title")).toBeTruthy();
   });
 
+  it("lists the site's lists (id + displayName), sorted, for the builder's new-form list picker", async () => {
+    const client = new MockGraphClient();
+    const lists = await client.listSiteLists("site1");
+    expect(lists.length).toBeGreaterThan(1);
+    expect(lists.every((l) => typeof l.id === "string" && typeof l.displayName === "string")).toBe(true);
+    const names = lists.map((l) => l.displayName);
+    expect([...names].sort((a, b) => a.localeCompare(b))).toEqual(names);
+    // Every returned id is one getListColumns will accept (so a picked list actually resolves).
+    for (const l of lists) await expect(client.getListColumns("site1", l.id)).resolves.toBeInstanceOf(Array);
+  });
+
   it("returns the base config plus the admin overlay for the known fixture form", async () => {
     const client = new MockGraphClient();
     const files = await client.getSkyeFormConfigFiles("site1", "test-event-signup");
@@ -66,6 +77,78 @@ describe("MockGraphClient", () => {
     const client = new MockGraphClient();
     const forms = await client.listSkyeForms("site1");
     expect(forms).toEqual([{ formId: "test-event-signup", title: "Event Sign-up" }]);
+  });
+
+  describe("set-up-a-new-site flow", () => {
+    it("resolves a SharePoint URL to a synthetic new site, and null for an unreachable one", async () => {
+      const client = new MockGraphClient();
+      const site = await client.resolveSiteByUrl("https://contoso.sharepoint.com/sites/BrandNew");
+      expect(site).toMatchObject({ webUrl: "https://contoso.sharepoint.com/sites/BrandNew" });
+      expect(await client.resolveSiteByUrl("not a url")).toBeNull();
+      expect(await client.resolveSiteByUrl("https://contoso.sharepoint.com/sites/notfound-xyz")).toBeNull();
+    });
+
+    it("reduces a deep page/library URL to the site, and a Teams link to a per-group site", async () => {
+      const client = new MockGraphClient();
+      const fromPage = await client.resolveSiteByUrl("https://contoso.sharepoint.com/sites/BrandNew/Shared%20Documents/Forms/AllItems.aspx");
+      expect(fromPage).toMatchObject({ webUrl: "https://contoso.sharepoint.com/sites/BrandNew" });
+
+      const fromTeams = await client.resolveSiteByUrl(
+        "https://teams.microsoft.com/l/team/19%3Ax%40thread.tacv2/conversations?groupId=6f69192b-0cd6-446c-b2cd-4677d8256d9a&tenantId=t"
+      );
+      expect(fromTeams?.siteId).toBe("mock-site-team-6f69192b");
+    });
+
+    it("reports no skye_data on a new site, then installs it and reports it present", async () => {
+      const client = new MockGraphClient();
+      const site = (await client.resolveSiteByUrl("https://contoso.sharepoint.com/sites/FreshSite"))!;
+      expect(await client.hasSkyeConfig(site.siteId)).toBe(false);
+
+      const result = await client.installSkyeSiteConfig(site.siteId);
+      expect(result).toMatchObject({ libraryName: "Site Assets" });
+      expect(result.libraryListId).toBeTruthy();
+      expect(result.skyeDataItemId).toBeTruthy();
+      expect(await client.hasSkyeConfig(site.siteId)).toBe(true);
+
+      // A just-installed site resolves to only the minimal default config, no overlays.
+      const files = await client.getSkyeSiteConfigFiles(site.siteId);
+      expect(files.map((f) => f.source)).toEqual(["base"]);
+      expect((files[0].config as { views: { allowedLists: string[] } }).views.allowedLists).toEqual([]);
+
+      // …and now shows up in the switcher's site list.
+      const sites = await client.searchSitesWithSkyeData();
+      expect(sites.some((s) => s.siteId === site.siteId)).toBe(true);
+    });
+
+    it("throws SkyeInstallError (kind 'forbidden') when the site simulates a permissions failure", async () => {
+      const client = new MockGraphClient();
+      await expect(client.installSkyeSiteConfig("mock-site-forbidden")).rejects.toMatchObject({
+        name: "SkyeInstallError",
+        kind: "forbidden",
+      });
+    });
+
+    it("throws 'siteAssetsMissing' the first time, then succeeds on retry (as if the user created Site Assets)", async () => {
+      const client = new MockGraphClient();
+      await expect(client.installSkyeSiteConfig("mock-site-noassets-x")).rejects.toMatchObject({ kind: "siteAssetsMissing" });
+      const result = await client.installSkyeSiteConfig("mock-site-noassets-x");
+      expect(result.libraryName).toBe("Site Assets");
+    });
+
+    it("canWriteSkyeData: true on a configured site, false when read-only or not set up", async () => {
+      const client = new MockGraphClient();
+      const fixtureSite = (await client.searchSitesWithSkyeData())[0];
+      expect(await client.canWriteSkyeData(fixtureSite.siteId)).toBe(true);
+
+      // A site that isn't set up yet — nothing to write into.
+      const fresh = (await client.resolveSiteByUrl("https://contoso.sharepoint.com/sites/NotYetSet"))!;
+      expect(await client.canWriteSkyeData(fresh.siteId)).toBe(false);
+      await client.installSkyeSiteConfig(fresh.siteId);
+      expect(await client.canWriteSkyeData(fresh.siteId)).toBe(true);
+
+      // A read-only user.
+      expect(await client.canWriteSkyeData("mock-site-readonly")).toBe(false);
+    });
   });
 
   // Uses its own siteId ("site-builder-test") rather than "site1", so writes here can't be

@@ -323,6 +323,63 @@ async function runCalendarAccessWithCurrentScopes(
   renderRows(tbody, rows);
 }
 
+/**
+ * Troubleshoots why the site switcher's step-1 list ("sites with SKYE") is
+ * or isn't finding a `skye_data` folder — the folder now lives in each
+ * site's Site Assets library. Dumps the raw `/search/query` response, the
+ * `/me/followedSites` fallback source, and (per given site id) walks
+ * hasSkyeConfig's actual steps so it's visible exactly where it stops.
+ */
+async function runSkyeStorageChecks(
+  graph: RealGraphClient,
+  graphFetch: (path: string, init: RequestInit) => Promise<Response>,
+  siteIds: string[],
+  rows: CheckRow[],
+  tbody: HTMLTableSectionElement
+) {
+  // 1. Raw /search/query for "skye_data" — exactly what searchSitesWithSkyeData()'s primary source is.
+  await runClientCheck(rows, tbody, "POST /search/query 'skye_data' — RAW (powers the switcher's site list)", async () => {
+    const res = await graphFetch("/search/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requests: [{ entityTypes: ["driveItem"], query: { queryString: "skye_data" }, from: 0, size: 50 }] }),
+    });
+    if (!res.ok) return `HTTP ${res.status} ${res.statusText} — ${(await res.text().catch(() => "")).slice(0, 300)}`;
+    const data = (await res.json()) as { value?: Array<{ hitsContainers?: Array<{ hits?: Array<{ resource?: Record<string, unknown> }> }> }> };
+    const hits = data.value?.[0]?.hitsContainers?.[0]?.hits ?? [];
+    if (hits.length === 0) return "0 hits. Search is eventually consistent — a folder created minutes ago may not be indexed yet, and Site Assets content indexing is uncertain regardless.";
+    const lines = hits.slice(0, 12).map(({ resource: r = {} }) => {
+      const pr = (r.parentReference ?? {}) as Record<string, unknown>;
+      return `• name=${JSON.stringify(r.name)} folder=${"folder" in r} parentRef.siteId=${pr.siteId ?? "(none)"} webUrl=${r.webUrl ?? "(none)"}`;
+    });
+    return `${hits.length} hit(s):\n${lines.join("\n")}`;
+  });
+
+  // 2. GET /me/followedSites — the 2nd source. Needs Sites.Read.All, so a 403 here is expected on a Sites.Selected-only app.
+  await runFetchCheck(rows, tbody, "GET /me/followedSites (2nd site-list source — needs Sites.Read.All)", () =>
+    graphFetch("/me/followedSites", { method: "GET" })
+  );
+
+  // 3. Per given site: walk hasSkyeConfig's steps.
+  const sub = (siteId: string, s: string) => (siteId.includes(":") ? `/sites/${siteId}:${s}` : `/sites/${siteId}${s}`);
+  for (const siteId of siteIds) {
+    await runClientCheck(rows, tbody, `[${siteId}] graph.hasSkyeConfig() — does SKYE's real code find it?`, async () => {
+      const has = await graph.hasSkyeConfig(siteId);
+      return has ? "true — SKYE IS set up on this site (switcher just isn't listing it)." : "false — no skye_data/config/skye.config.json found in Site Assets.";
+    });
+
+    await runClientCheck(rows, tbody, `[${siteId}] find Site Assets list ($filter=displayName eq 'Site Assets')`, async () => {
+      const res = await graphFetch(sub(siteId, `/lists?$filter=${encodeURIComponent("displayName eq 'Site Assets'")}&$select=id,name,displayName,webUrl`), { method: "GET" });
+      if (!res.ok) return `HTTP ${res.status} — ${(await res.text().catch(() => "")).slice(0, 200)}`;
+      const data = (await res.json()) as { value?: Array<Record<string, unknown>> };
+      const l = data.value?.[0];
+      return l ? `id=${l.id} name=${JSON.stringify(l.name)} displayName=${JSON.stringify(l.displayName)} webUrl=${l.webUrl}` : "no match — $filter returned nothing (try direct GET /lists/SiteAssets or a full scan).";
+    });
+
+    await runFetchCheck(rows, tbody, `[${siteId}] direct GET /lists/SiteAssets`, () => graphFetch(sub(siteId, "/lists/SiteAssets?$select=id,name,displayName"), { method: "GET" }));
+  }
+}
+
 async function runDiagnostics(
   applicationId: string,
   tenantId: string | undefined,
@@ -404,9 +461,11 @@ async function runDiagnostics(
   // other app-specific scopes. If this fails too, the problem isn't scope-specific.
   await runFetchCheck(rows, tbody, "GET /me (baseline identity, no special scope)", () => graphFetch("/me", { method: "GET" }));
 
-  // Step 4: Calendars.ReadWrite.Shared, against the signed-in user's OWN calendar (doesn't need
-  // Sites.Selected or any site grant at all).
-  await runFetchCheck(rows, tbody, "GET /me/events?$top=1 (Calendars.ReadWrite.Shared)", () => graphFetch("/me/events?$top=1", { method: "GET" }));
+  // Step 4: calendar read. Calendars.ReadWrite.Shared is NO LONGER in GRAPH_SCOPES (confirmed
+  // blocked on IU — see authProvider.ts), so the combined token above carries no calendar scope
+  // and this is EXPECTED to 403. Kept as a standing check: the day it starts succeeding, IU has
+  // granted a calendar scope and it's worth adding back to GRAPH_SCOPES.
+  await runFetchCheck(rows, tbody, "GET /me/events?$top=1 (calendar — EXPECTED 403, no calendar scope requested)", () => graphFetch("/me/events?$top=1", { method: "GET" }));
 
   // Step 5: User.ReadBasic.All, via the exact GraphClient method the peoplePicker control uses.
   await runClientCheck(rows, tbody, "searchPeople('') (User.ReadBasic.All, via GraphClient)", async () => {
@@ -427,6 +486,11 @@ async function runDiagnostics(
     await runFetchCheck(rows, tbody, `GET /sites/${siteId} (Sites.Selected + this site's grant)`, () => graphFetch(`/sites/${siteId}`, { method: "GET" }));
     await runFetchCheck(rows, tbody, `GET .../lists for ${siteId} (list enumeration)`, () => graphFetch(siteSubResourcePath(siteId, "/lists"), { method: "GET" }));
   }
+
+  // Step 6b: SKYE storage discovery — why the switcher's "sites with SKYE" list does/doesn't find
+  // a site's skye_data folder (now in Site Assets). Dumps the raw /search/query response + walks
+  // hasSkyeConfig per site. Runs unconditionally (its answer isn't known yet).
+  await runSkyeStorageChecks(graph, graphFetch, siteIds, rows, tbody);
 
   // Step 7: the exact call getListColumns makes, if a specific list id was given — proves the full
   // real path SKYE's field-registry/populateChoiceOptions relies on, not just raw site access.

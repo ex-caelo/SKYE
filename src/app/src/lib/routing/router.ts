@@ -186,6 +186,17 @@ export function buildViewUrl(siteId: string, applicationId: string, tenantId: st
 }
 
 /**
+ * Builds a `/builder` URL for a known site. With no `formId` the builder
+ * opens its "pick a form / start a new one" chooser; with one it opens that
+ * form directly. Used by the switcher's "Create New Form Config" button and
+ * `/form`'s "Edit in Builder" link.
+ */
+export function buildBuilderUrl(siteId: string, applicationId: string, tenantId: string | undefined, formId?: string): string {
+  const params = withTenantId(new URLSearchParams({ siteId, applicationId }), tenantId);
+  return `/builder?${params.toString()}${formId ? `#${formId}` : ""}`;
+}
+
+/**
  * Builds the /switcher URL to bounce to when /view can't resolve a route
  * (missing siteId). The wanted view id travels as a `?view=` param rather
  * than in the hash, so the switcher can tell "resume this view" apart from

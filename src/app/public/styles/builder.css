@@ -23,18 +23,52 @@
 .skye-builder__dict-add-error, .skye-builder__new-form-error { color: #b91c1c; font-size: 0.8rem; }
 
 .skye-builder__settings h3 { margin: 1rem 0 0.4rem; font-size: 0.95rem; }
-.skye-builder__add-field { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+.skye-builder__add-field { display: flex; gap: 0.5rem; align-items: end; margin-bottom: 1rem; flex-wrap: wrap; }
+.skye-builder__add-field > label { display: flex; flex-direction: column; font-size: 0.78rem; color: #555; gap: 0.15rem; }
 .skye-builder__overlay-note { font-size: 0.85rem; color: #666; background: #f9fafb; padding: 0.5rem; }
 
-.skye-builder__new-form { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #ddd; display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
-.skye-builder__new-form input { flex: 1 1 auto; min-width: 10rem; }
+/* "required SharePoint columns with no field" panel (lib/builder/formSettingsEditor.ts) */
+.skye-builder__required-warn { border: 1px solid #eab308; background: #fefce8; border-radius: 4px; padding: 0.6rem 0.75rem; margin-bottom: 1rem; }
+.skye-builder__required-warn-msg { margin: 0 0 0.4rem; font-size: 0.85rem; font-weight: 600; color: #92400e; }
+.skye-builder__required-warn ul { margin: 0 0 0.4rem; padding-left: 1.1rem; }
+.skye-builder__required-warn li { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; font-size: 0.83rem; margin-bottom: 0.2rem; }
+.skye-builder__required-warn li button, .skye-builder__required-addall { font-size: 0.78rem; padding: 0.15rem 0.5rem; }
 
-/* --- shared modal confirm dialog (lib/ui/confirmDialog.ts) — used by /builder's save-review diff and /form's draft-preview run-actions gate --- */
-.skye-dialog-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.skye-dialog { background: white; max-width: 40rem; width: 90%; max-height: 85vh; overflow-y: auto; padding: 1.25rem; border-radius: 4px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25); }
-.skye-dialog h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
+/* --- Post Actions, grouped by trigger phase (lib/builder/formSettingsEditor.ts) --- */
+.skye-builder__phase { border: 1px solid #ddd; border-radius: 4px; padding: 0.6rem 0.75rem; margin-bottom: 0.9rem; }
+.skye-builder__phase > h4 { margin: 0 0 0.15rem; font-size: 0.9rem; }
+.skye-builder__phase-blurb { margin: 0 0 0.6rem; font-size: 0.78rem; color: #666; }
+.skye-builder__phase-empty { margin: 0.2rem 0; font-size: 0.8rem; color: #999; font-style: italic; }
+.skye-builder__phase[data-phase=""] { border-color: #b91c1c; }
+
+/* a "wave" = the set of actions that start at the same moment; consecutive waves run in sequence */
+.skye-builder__wave { border-left: 3px solid #2563eb; padding-left: 0.6rem; margin: 0.3rem 0; }
+.skye-builder__wave-label { margin: 0 0 0.3rem; font-size: 0.75rem; font-weight: 600; color: #2563eb; text-transform: uppercase; letter-spacing: 0.03em; }
+.skye-builder__wave-sep { margin: 0.1rem 0 0.1rem 0.2rem; font-size: 0.8rem; font-weight: 600; color: #555; }
+
+.skye-builder__action-card .skye-builder__dict-entry-heading { align-items: center; gap: 0.5rem; }
+.skye-builder__phase-move { font-weight: 400; font-size: 0.78rem; color: #555; margin-left: auto; }
+.skye-builder__seq { margin: 0 0 0.4rem; font-size: 0.78rem; }
+.skye-builder__seq--after { color: #b45309; }
+.skye-builder__seq--parallel { color: #6b7280; }
+
+.skye-builder__depends { display: flex; flex-direction: column; gap: 0.15rem; }
+.skye-builder__depends-option { font-weight: 400; font-size: 0.82rem; }
+.skye-builder__depends-empty { font-size: 0.8rem; color: #999; }
+
+.skye-builder__new-form { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #ddd; }
+.skye-builder__new-form summary { cursor: pointer; }
+.skye-builder__new-form summary h2 { display: inline; font-size: 1rem; }
+.skye-builder__new-form form { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; margin-top: 0.6rem; }
+.skye-builder__new-form input, .skye-builder__new-form select { flex: 1 1 auto; min-width: 10rem; }
+
+/* --- shared modal confirm dialog (components/ConfirmDialog.astro + lib/ui/confirmDialog.ts) —
+   a native <dialog>, so the backdrop/centering/Esc handling come from the platform --- */
+dialog.skye-dialog { max-width: 40rem; width: 90%; max-height: 85vh; overflow-y: auto; padding: 1.25rem; border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25); }
+dialog.skye-dialog::backdrop { background: rgba(0, 0, 0, 0.4); }
+.skye-dialog__heading { margin: 0 0 0.75rem; font-size: 1.1rem; }
 .skye-dialog__body { margin-bottom: 1rem; }
-.skye-dialog__actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+.skye-dialog__actions { display: flex; justify-content: flex-end; gap: 0.5rem; list-style: none; margin: 0; padding: 0; }
 .skye-dialog__primary { font-weight: 600; }
 
 /* --- review-before-save diff (lib/builder/configDiffView.ts) --- */

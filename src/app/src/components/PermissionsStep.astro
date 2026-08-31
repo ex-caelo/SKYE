@@ -1,0 +1,32 @@
+---
+/**
+ * Shown right after SKYE is installed on a new site (/switcher). SKYE
+ * can't set SharePoint ACLs via Graph, so this explains that Members can
+ * currently edit SKYE's files and links to the skye_data folder's
+ * permission settings. fillPermissionsStep() (src/lib/routing/siteSwitcher.ts)
+ * fills the site/library names, sets the link href (or removes the link
+ * when none resolved), and wires the "finished" button.
+ */
+---
+
+<section class="skye-site-switcher skye-permissions-step" data-state id="step-permissions" hidden>
+  <h2>Manage permissions</h2>
+  <p>
+    SKYE is set up on <span data-slot="site-name"></span>, in a "skye_data"
+    folder inside the <span data-slot="library-name"></span> library. Right
+    now both Owners and Members of <span data-slot="site-name"></span> can
+    edit SKYE's forms, views, and config there. Most setups restrict
+    Members to view-only — an owner does that by breaking permission
+    inheritance on the skye_data folder in SharePoint (the link below opens
+    that folder's permission settings directly).
+  </p>
+  <a
+    class="skye-permissions-step__link"
+    data-el="manage-link"
+    target="_blank"
+    rel="noopener noreferrer"
+    hidden>Open the skye_data folder's permission settings ↗</a>
+  <button class="skye-permissions-step__done" data-el="done" type="button">
+    I'm finished setting permissions
+  </button>
+</section>

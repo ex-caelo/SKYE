@@ -79,10 +79,125 @@ outside of a sandboxed environment.
   read and merges whichever ones come back. See TODO §5 for the still-open
   verification item (confirm Graph omits vs. 403s on inaccessible folders
   in your tenant).
+- **SKYE data lives in a `skye_data` folder inside the site's Site Assets
+  library** — deliberately not the default `Documents` library (out of
+  users' way, permissions manageable separately), but Site Assets is an
+  ordinary document library so creating folders/files in it only needs the
+  `write` grant (creating a *library* needs `manage`, which many
+  `Sites.Selected` grants don't have — that's why the earlier dedicated-
+  library attempt 403'd). `RealGraphClient.skyeItemPath(siteId, rel)`
+  resolves+caches the Site Assets driveId (`resolveSiteAssetsDrive` →
+  `findSiteAssetsListId`): Site Assets is a **hidden system list** on many
+  sites (Teams-provisioned ones), excluded from BOTH the `/lists` and
+  `/drives` *collection* responses. What works, in order: (1) a **`$filter`**
+  — `GET …/lists?$filter=displayName eq 'Site Assets'` surfaces the hidden
+  list (confirmed against `msteams_79e519`; `$filter=name eq …` is a 400 —
+  `name` isn't filterable); (2) direct `GET …/lists/SiteAssets`; (3) a
+  paginated `/lists` scan, then a `/drives` scan. The `$filter` call carries
+  `$expand=drive` so the driveId comes back in the same response (no separate
+  `/lists/{id}/drive` round-trip on the fast path); the resolved driveId is
+  cached per site per session. Builds `/drives/{driveId}/root:/skye_data/…`;
+  throws `SkyeNotConfiguredError` if the site has no Site Assets library.
+  `listSkyeForms`/`listSkyeViews` treat a 404 on `skye_data/forms|views` as
+  "none" (a fresh install may have `skye_data/config` but not those folders).
+  `getListItemImage` / `uploadToLibrary` address other drives directly and
+  are unaffected.
+- **If the site has no Site Assets library, SKYE can't create it** —
+  `installSkyeSiteConfig` throws `SkyeInstallError` kind `"siteAssetsMissing"`
+  and the switcher shows a "One step in SharePoint first" step
+  (`renderCreateSiteAssetsStep`): a link to `…/_layouts/15/CreatePage.aspx`
+  (adding+saving any page provisions Site Assets), a "Check again" button
+  that re-runs the install, and a ~30s auto-poll that advances on its own
+  once the library appears.
+- **Provisioning a new site** is self-service from the site switcher's
+  site-picker step (`renderAddSitePanel` → `entry-switcher.ts`): paste any
+  link to the site (`lib/graph/siteUrl.ts`'s `parsePastedSiteUrl` reduces a
+  deep SharePoint page/library URL to its site root, and pulls the group id
+  out of a Teams channel deep link — the latter resolved via
+  `GET /groups/{id}/sites/root`, which needs a scope beyond `Sites.Selected`
+  and 403s gracefully until one's added) → `resolveSiteByUrl` →
+  `hasSkyeConfig` → if none,
+  confirm and `installSkyeSiteConfig` creates the `SKYE` library
+  (`ensureSkyeLibrary`), writes `skye_data/config/skye.config.json`
+  (`DEFAULT_SITE_CONFIG` in `viewConfig.ts` — empty allowlists, no `home`)
+  plus empty `forms/`/`views/` folders, and returns the library's list id.
+  Needs the signed-in user's permission to add a library to the site AND
+  SKYE's `Sites.Selected` grant covering it; a 403 becomes
+  `SkyeInstallError` (`kind: "forbidden"`) naming both possibilities.
+- **After install, the switcher shows a "Manage permissions" step**
+  (`renderPermissionsStep`) — SKYE can't set SharePoint ACLs via Graph, so
+  it explains Members can currently edit SKYE's files and links out (new
+  tab) to the **`skye_data` folder's** classic item-level permissions page:
+  `buildFolderPermissionsUrl` → `…/_layouts/15/user.aspx?List={listId}&obj={listId},{itemId},LISTITEM&noredirect=true`
+  (GUID dashes `%2D`-encoded, no braces — SharePoint's own "Manage access →
+  Advanced" format for an item). `installSkyeSiteConfig` gets both ids from
+  the folder's `GET …/root:/skye_data?$select=sharepointIds` →
+  `{ listId, listItemId }`. Falls back to `buildLibraryPermissionsUrl`
+  (whole library) if only the list id resolved, else no link. "I'm
+  finished setting permissions" continues into the site. The actual
+  inheritance break / Member demotion is a manual SharePoint step (or a
+  future SP-REST automation).
 - **Never fetch full SharePoint lists client-side.** Lookups query
   server-side with `$filter`/`$search` + `$top`; always `$select` only the
   fields actually needed; batch related reads via Graph `/$batch` where
   possible; retry 429s honoring `Retry-After`.
+
+## Page markup lives in `.astro`; the entry script only toggles/fills it
+
+Each page ships **every one of its states at once** as sibling
+`<section data-state id="…">` elements inside `<main id="skye-app">`,
+authored as real semantic HTML in `src/pages/*.astro` (composed from
+`src/layouts/BaseLayout.astro` + `src/components/*.astro`). The
+`src/scripts/entry-*.ts` for a page decides **which** state is visible and
+fills its data-driven regions — it does not build markup with
+`document.createElement` / `innerHTML` anymore.
+
+- **`src/lib/ui/pageState.ts`** — `showState(root, id)` reveals one
+  `[data-state]` section and `hidden`s its siblings; `fillSlot(scope,
+  name, text)` sets a `[data-slot="name"]`'s text; `el(scope, name)` gets
+  a `[data-el="name"]` control. A missing hook throws (skeleton/script
+  drift is a loud failure, not a silent no-op). `public/styles/form.css`
+  and `src/styles/view.css` carry a `[hidden] { display: none !important }`
+  guard.
+- **Hooks:** `id` for a whole state section, `data-slot` for a text region
+  or a mount point the JS appends into (e.g. `[data-slot="form-mount"]`,
+  `[data-slot="preview"]`), `data-el` for an interactive control the JS
+  wires, `data-tpl` / a bare `<template>` for a repeated row the JS clones
+  (site row, picker row, builder error `<li>`). `src/lib/ui/domHooks.ts`
+  holds the cross-file ones (confirm dialog, message panel).
+- **What is still built in TS** (deliberately — the markup is genuinely
+  per-record, not fixed): the rendered form itself (`lib/render/*` from a
+  FormConfig), the schema-driven property editor
+  (`lib/builder/fieldEditor.ts` / `schemaControls.ts` /
+  `formSettingsEditor.ts`), the save-review diff
+  (`lib/builder/configDiffView.ts`), the live preview
+  (`lib/builder/builderPreview.ts`), and all of `entry-diag.ts` /
+  `pages/diag.astro` (an internal tool, left as-is). These append into a
+  `[data-slot]` in the page skeleton.
+- **Reusable components:** `BaseLayout.astro` (doc shell + `<main id="skye-app">`
+  + a `head` slot), `ConfirmDialog.astro` (a native `<dialog>` — backdrop /
+  Esc / focus from the platform; `lib/ui/confirmDialog.ts` fills it, opens
+  it, resolves with the clicked `<button value>`; feature-detects
+  `showModal`/`close` so jsdom < 26 in tests still works via an
+  open-attribute + `close`-event emulation), `MessagePanel.astro`
+  (`lib/ui/messagePanel.ts`), and the switcher steps `SitePicker` /
+  `FormPicker` / `FormOrViewPicker` / `AddSitePanel` / `PermissionsStep` /
+  `CreateSiteAssetsStep` (populated by the `populate*` / `wire*` / `fill*`
+  helpers in `lib/routing/siteSwitcher.ts`).
+- **Semantic HTML / native features:** prefer `<section>`/`<header>`/
+  `<aside>`/`<output>`/`<menu>`/`<details>` over `<div>`; `<dialog>` for
+  modals. `command` / `commandfor` (Invoker Commands) are used for
+  purely-declarative show/hide; `src/lib/ui/invokers.ts`'s
+  `ensureInvokerCommands()` (called early by each entry script)
+  dynamic-imports the `invokers-polyfill` package **only** on browsers
+  without native support.
+- **Tests** for the DOM helpers mount the real `.astro` component body via
+  `src/__tests__/helpers/astroFixture.ts` (reads the file, strips
+  frontmatter — the components are expression-free), so there is no
+  hand-copied fixture to drift. `src/__tests__/astroMarkupHooks.test.ts`
+  additionally asserts every `id`/`data-slot`/`data-el`/`data-tpl` the TS
+  queries is present in the source — a rename on one side without the
+  other fails there.
 
 ## Custom Views (`src/app/src/lib/views/`, `pages/view.astro`)
 
@@ -153,6 +268,27 @@ out); this section is the durable "how it fits together" reference.
   merges those in by discriminator match; the builder's postAction editor
   (`formSettingsEditor.ts`) tears down and rebuilds just one entry's body
   when its `type` changes, to swap in the right payload fields.
+- **The Post Actions editor is grouped into one section per `trigger`
+  phase** (`beforeSubmit` / `afterSubmit` / `onSuccess` / `onError`), each
+  with a one-line "when it runs" blurb. Adding an action inside a section
+  presets its `trigger`; a per-card "Phase" `<select>` moves it (and prunes
+  any now-cross-phase `dependsOn`). An action with an unrecognised/absent
+  `trigger` shows in a red "Not assigned to a phase" section rather than
+  vanishing. Within a phase, actions are grouped into **"waves"**
+  (`computeWaves` — wave 0 = no in-phase `dependsOn`; wave N depends on an
+  earlier wave) so the UI shows "Step 1 — these N run at the same time",
+  a "↓ then" separator, "Step 2", …; each card also says "Starts
+  immediately…" or "Waits for: X". `dependsOn` is a **checkbox list of the
+  other actions in the same phase**, not a comma-separated text box. A
+  `script` action's `functionName` is a `<select>` grouped by service
+  (`<optgroup>` teams / outlook / engage) sourced from the real
+  `scriptActions` registry (`src/actions/registry.ts`), threaded in as
+  `renderFormSettingsEditor(..., { scriptActionNames })` from
+  `entry-builder.ts` (`Object.keys(scriptActions)`); a value the current
+  build doesn't register is still shown, flagged "(unknown)". Structural
+  edits (add/remove, phase move, `dependsOn` toggle, `type` change)
+  re-render the whole editor so the waves + checkbox lists stay accurate;
+  plain field edits don't.
 - **An overlay's field/page/postAction entries must be FULL objects, not
   sparse patches** — confirmed from `form.config.overlay.schema.json`
   itself (any field an overlay declares still needs `controlType`, same
@@ -182,36 +318,88 @@ out); this section is the durable "how it fits together" reference.
   a deliberate scope decision (confirmed with the user) — the builder
   writes back to SharePoint directly on Save, it doesn't just export JSON
   for manual upload.
-- **New-form creation doesn't add a "list every SharePoint list on a site"
-  Graph call** — a form author hand-enters the target list's GUID (which
-  they'd already have from the list's own SharePoint settings URL) rather
-  than the builder enumerating every list on the site; a scope cut
-  confirmed with the user rather than guessed at.
+- **New-form creation's target list is picked from a dropdown of the
+  site's lists** (`GraphClient.listSiteLists(siteId)` — a paginated
+  `GET /sites/{id}/lists`, `$select`ed small, hidden system lists filtered
+  out via `list.hidden`, sorted by display name). An earlier pass had the
+  author hand-enter the list GUID (a deliberate scope cut); the user
+  reversed that — enumerating a site's lists is list *metadata* (a small
+  bounded collection), not list *items*, so the "never fetch a full list
+  client-side" rule doesn't apply. `entry-builder.ts`'s "Or start a new
+  form" section renders a `<select>`; a trailing "Other — enter a list id
+  manually…" option reveals the old free-text input for a list on another
+  site or one the enumeration missed, and the optional "different siteId"
+  field re-enumerates that site's lists into the dropdown when changed.
+- **Adding a field starts from the SharePoint column, not the control
+  type.** The "+ Add field" sub-form has a **Source** `<select>`
+  (`sharepoint` / `virtual`) and, for `sharepoint`, a **Bind to** `<select>`
+  of the target list's live columns (`state.listColumns`). Picking a
+  column auto-selects the matching `controlType`
+  (`lib/builder/columnMapping.ts`'s `controlTypeForColumn` — `text`→text,
+  `note`→textarea, `dateTime`→date, `choice`→select, `boolean`→checkbox,
+  `personOrGroup`→peoplePicker, `lookup`→lookupPicker, `currency`→currency,
+  `number`→number, `hyperlinkOrPicture`→url) and pre-fills a camelCased key
+  from the column name (`fieldKeyForColumn`, `_x0020_`-decoded, de-duped).
+  The type stays manually overridable. The field written is
+  `fieldConfigForColumn(column, page)` → `{ source: "sharepoint", bindTo,
+  controlType, label (if displayName differs), required (if the column
+  is), page }`. `source: "sharepoint"` with no column bound is refused
+  (the schema wants `bindTo`); no live columns at all → the SP-only
+  controls hide and it falls back to a plain virtual field.
+- **The builder keeps a form submittable against its list's required
+  columns.** `columnMapping.ts`'s `missingRequiredColumns(fields, columns)`
+  returns the required, non-`readOnly` columns no `source: "sharepoint"`
+  field binds to. A **brand-new form** is seeded with a bound field for
+  every one of them (in `openBuilder`, right after `getListColumns`). An
+  **existing form** (base or draft view only — not an additive overlay)
+  shows a "N required SharePoint columns have no field" panel at the top of
+  Form settings, with per-column "Add field" and an "Add all" button
+  (`renderFormSettingsEditor`'s new `{ listColumns, defaultPageKey,
+  requiredColumnCheck, onFieldsChanged }` options) — surfaced, not
+  silently mutated, so the author decides. `mapColumn` now also captures
+  Graph's `readOnly` so computed/system required columns (Created, …) are
+  skipped everywhere here.
 
 **Second pass (per explicit follow-up feedback), summarized here; full
 build log in TODO §17:**
 
 - **Access is permission-gated, not just Save-gated.** `/builder` checks
-  `lib/builder/permissions.ts`'s `canEditFormConfig` (site config's new
-  `builderEditors: string[]` field — names of `[permission]` overlay
-  folders under `skye_data/config/` that grant edit rights, checked
-  against which of THOSE the signed-in user can currently read, per normal
-  SharePoint ACLs) BEFORE rendering the site/form picker or the builder
-  itself — a non-editor sees a plain "you don't have edit permission"
-  panel, never the builder UI. The same check backs `/form`'s new "Edit in
-  Builder" link (shown only when it resolves true).
-- **Answered "should reused interactions become components": not Astro
-  components** — this whole app is static-output (no SSR), so anything
-  whose content depends on runtime state (an error panel, a confirm
-  dialog) has to be built by client JS regardless of framework; an
-  `.astro` file can't help since it only runs at build time. What DID get
-  extracted as shared modules: `lib/ui/confirmDialog.ts` (a generic modal
-  confirm with custom button labels — used for both the save-review diff
-  below and `/form`'s draft-preview run-actions gate) and
-  `lib/ui/messagePanel.ts` (the permission-denied screen, reusable for any
-  future "show a plain state instead of the normal page" need). Same
-  "shared TS DOM-builder function, not a framework component" pattern this
-  app already used for `renderSiteSwitcher`/`renderFormPicker`.
+  `lib/builder/permissions.ts`'s `canEditFormConfig` BEFORE rendering the
+  site/form picker or the builder itself — a non-editor sees a plain "you
+  don't have edit permission" panel, never the builder UI. The same rule
+  backs `/form`'s "Edit in Builder" link and the **site switcher's "Create
+  New Form Config" button** (`renderFormOrViewPicker`'s optional
+  `onCreateNew` → `buildBuilderUrl` → `/builder?siteId=…`). `canEditFormConfig`
+  grants access two ways, OR'd:
+  1. **`graph.canWriteSkyeData(siteId)`** — the real requirement. Graph has
+     no read-only signal for a user's effective folder permission (the
+     `permissions` collection needs manage-permissions rights just to read,
+     so a contributor gets a false negative), so it's a **functional
+     probe**: PUT a `skye-write-check.tmp` marker into `skye_data/` and
+     DELETE it — 2xx on the PUT means write access. Every failure (403, no
+     Site Assets library, name rejected, network) → `false`; the callers
+     are UI affordances where a wrong "yes" just dead-ends at Save. This is
+     what makes the builder usable on a freshly-installed site.
+  2. site config's `builderEditors: string[]` (names of `[permission]`
+     overlay folders under `skye_data/config/` the user can currently
+     read) — kept as an explicit-allowlist / backward-compatible path via
+     `canEditFormConfigs(configFiles)`.
+  `entry-switcher.ts` gates the button on `(await graph.canWriteSkyeData(siteId))
+  || canEditFormConfigs(configFiles)` (it already has the config files in
+  hand, so it inlines the OR rather than re-fetching through
+  `canEditFormConfig`).
+- **Reused interactions: first "shared TS DOM-builder", later reworked
+  into Astro components** — the original take was that a static-output SPA
+  can't benefit from components because the *content* is runtime-decided.
+  A later pass (see "Markup lives in `.astro`, JS toggles it" below)
+  changed that: the *skeleton* of every screen/dialog/panel is fixed and
+  CAN be authored as HTML; only visibility and a few text nodes are
+  runtime. So `lib/ui/confirmDialog.ts` and `lib/ui/messagePanel.ts` now
+  drive `components/ConfirmDialog.astro` (a native `<dialog>`) and
+  `components/MessagePanel.astro` instead of building their own DOM, and
+  the switcher's `renderSiteSwitcher`/`renderFormPicker`/… became
+  `populateSitePicker`/`populateFormPicker`/… that fill
+  `components/SitePicker.astro` etc.
 - **Save now shows a diff before it commits.** `@skye/config`'s
   `computeConfigDiff` (pure, `merge/configDiff.ts`) compares the config as
   loaded/last-saved this session against the current in-memory edits,
@@ -423,6 +611,38 @@ not just get a look-alike CSS class.
   both packages** (up from 367 — 82 in `@skye/config`, 287 in
   `@skye/app`), both type-check clean, Astro production build verified.
 
+## Auth: tenant resolution (`src/app/src/lib/auth/tenantResolver.ts`)
+
+A single-tenant Azure app registration rejects the `/common` authority
+(`AADSTS50194`), and that failure is **not cleanly recoverable** — the
+popup dead-ends on an AAD error page MSAL can't read back, so it just
+surfaces as `user_cancelled`. So SKYE never speculatively tries `/common`
+for a single-tenant app; it establishes the tenant id first.
+
+Resolution order in `acquireToken`:
+1. `?tenantId=` in the URL, or `PUBLIC_DEFAULT_TENANT_ID`;
+2. a tenant id a previous successful sign-in on this browser cached in
+   `localStorage`;
+3. **otherwise, ask.** `acquireToken` shows a small modal for the user's
+   work email and resolves it to a tenant GUID via Entra's public,
+   unauthenticated OIDC discovery document
+   (`https://login.microsoftonline.com/<domain>/v2.0/.well-known/openid-configuration`
+   — the `issuer` carries the GUID), caches it, and rewrites the address
+   bar to `?tenantId=<guid>` (`history.replaceState`, no navigation) so
+   it's a one-time step.
+
+After **any** successful sign-in, `rememberTenantFromResult` caches +
+backfills the real tenant id from the MSAL `AuthenticationResult`. If a
+provided/cached tenant is itself rejected (`AADSTS50194`/`90002`/`500011`/
+`90072`), the cache is cleared and the prompt runs.
+
+A genuinely **multi-tenant** deployment sets `PUBLIC_AUTH_ALLOW_COMMON=1`
+to try `/common` first instead of prompting. `PUBLIC_DEFAULT_TENANT_ID`
+remains the zero-prompt option for a single-org deployment. Tenant GUIDs
+aren't secret (every token/URL/discovery doc carries one), so
+`localStorage` is fine. `acquireTokenPopupOnly` (diag only) is exempt — it
+manages the tenant explicitly. See `src/app/.env.example`.
+
 ## Real-tenant Graph permissions (IU) — what's available for actions/postActions
 
 Tested against the actual IU tenant (app registration `d7c6a2e3-...`, `Sites.Selected`
@@ -452,6 +672,12 @@ not a combined-request artifact.
 - `Calendars.ReadWrite.Shared` — needs admin consent that IU hasn't granted. This blocks
   the calendar-writing half of both `teams.scheduleMeeting` and `outlook.createCalendarEvent`
   (both already built and registered, but will fail at runtime until this changes).
+  **Removed from `GRAPH_SCOPES`** (`authProvider.ts`) as of this pass — MSAL requests the whole
+  scope set in one token call, so leaving an ungranted scope in the list broke sign-in entirely.
+  `GRAPH_SCOPES` is now `Sites.Selected` / `User.ReadBasic.All` / `Chat.Create` / `ChatMessage.Send`
+  / `Mail.Send` (all confirmed working). Calendar/meeting actions must use the `redirect` deep-link
+  workaround (`outlook.buildCalendarEventDeepLink`). If IU grants a calendar scope later, add
+  exactly that one back and re-test the combined sign-in.
 
 **⚠️ Uncertain — showed `user_cancelled`, not `access_denied`** (a *client-side* MSAL
 signal that the popup closed before finishing, which can mean either "the same
@@ -609,9 +835,12 @@ Summary as of the last update:
   fields reactively. `EtagConflictError` lets `submitForm.ts` report
   `conflict: true` distinctly. The site switcher
   (`GraphClient.searchSitesWithSkyeData`) uses Graph's `/search/query`
-  exactly per spec — entityType `driveItem`, filtered to an EXACT folder
-  named `skye_data` before resolving each hit to a site, so a site with no
-  SKYE configuration never appears. File uploads: `library` mode is fully
+  (entityType `driveItem`, `queryString: "skye_data"`), then trusts a hit
+  outright ONLY when its `webUrl` ends `/SiteAssets/skye_data` — every other
+  `skye_data` hit (stale index entry, old `Documents` copy, no `webUrl`) is
+  put through `hasSkyeConfig(siteId)` and dropped if false, so a site with no
+  `skye_data` in Site Assets never appears. All candidates resolve + verify
+  in parallel (`Promise.allSettled`), not sequentially. File uploads: `library` mode is fully
   implemented (Graph's simple-upload endpoint, writes `webUrl` back to the
   bound column); `attachment` mode is deliberately NOT implemented — Graph
   v1.0 has no solid endpoint for SharePoint list item attachments, and
@@ -684,9 +913,9 @@ Summary as of the last update:
   shareable preview link, a draft-preview submit gate with client-side
   validation + an explicit "run post-submission actions?" dialog); and two
   new shared UI primitives (`lib/ui/confirmDialog.ts`,
-  `lib/ui/messagePanel.ts`) answering whether reused interactions should
-  become components (yes, as plain TS modules — NOT Astro components; see
-  "Form Config Builder" above for why). Also surfaced and fixed a real
+  `lib/ui/messagePanel.ts`) — at the time as plain TS DOM-builders; a later
+  pass (see "Page markup lives in `.astro`" above) reworked both to drive
+  `components/ConfirmDialog.astro` / `components/MessagePanel.astro`. Also surfaced and fixed a real
   mock-only bug found during manual E2E verification (in-memory mock
   state didn't survive a real page navigation between `/builder` and
   `/form`, since this app has no client-side router between pages — now
@@ -733,17 +962,63 @@ Summary as of the last update:
   Config Builder" above for the full writeup. **369 tests passing across
   both packages** (up from 367 — 82 in `@skye/config`, 287 in
   `@skye/app`), both type-check clean, Astro production build verified.
+- ✅ Page markup moved out of TypeScript into the `.astro` files. Every
+  user-facing page (`index`/`404`/`view`/`form`/`switcher`/`builder`) now
+  ships all its states as `hidden` semantic sections composed from
+  `src/layouts/BaseLayout.astro` + `src/components/*.astro`; the
+  `entry-*.ts` scripts call `showState`/`fillSlot`/`el` (`lib/ui/pageState.ts`)
+  and clone `<template>`s instead of `createElement`/`innerHTML`. New:
+  `ConfirmDialog.astro` (native `<dialog>`), `MessagePanel.astro`, the six
+  switcher-step components, `lib/ui/invokers.ts` (`invokers-polyfill`,
+  conditionally imported, for `command`/`commandfor`). The
+  siteSwitcher/confirmDialog/messagePanel helpers changed shape
+  (`populate*`/`wire*`/`fill*`/`show*`), their 5 test files restructured to
+  mount the real `.astro` bodies, `astroMarkupHooks.test.ts` added as a
+  drift guard. Genuinely data-driven builders (renderForm, the
+  schema-driven field/settings editors, the save diff, diag) deliberately
+  left in TS. **442 tests passing across both packages** (82 in
+  `@skye/config`, 360 in `@skye/app`), both type-check clean, Astro build
+  verified, Custom Views browser gate still green, and a real-Chrome smoke
+  pass of every page. See "Page markup lives in `.astro`" above.
+- ✅ Builder Post Actions editor reworked: one section per `trigger` phase
+  (Before/After submit, On success, On error), sequential "waves" with
+  "Step N / ↓ then" so parallel-vs-sequential is visible at a glance,
+  `dependsOn` as a checkbox list of same-phase actions, and a `script`
+  action's `functionName` as a service-grouped `<select>` pulled from the
+  real `scriptActions` registry (all teams.* / outlook.* / engage.*
+  actions this build ships). `renderFormSettingsEditor` gained a
+  `{ scriptActionNames }` option, threaded from `entry-builder.ts`. **448
+  tests** (82 `@skye/config` + 366 `@skye/app`), type-check clean, build
+  verified, real-Chrome smoke of the phase editor + functionName dropdown.
+  See "Form Config Builder" above.
+- ✅ Builder field creation is column-first, and required columns are kept
+  covered. `lib/builder/columnMapping.ts` (new): `controlTypeForColumn` /
+  `fieldConfigForColumn` / `fieldKeyForColumn` / `missingRequiredColumns`.
+  The "+ Add field" sub-form gained **Source** + **Bind to** `<select>`s —
+  picking a column auto-selects the `controlType` and pre-fills the key. A
+  brand-new form is seeded with a bound field per required column; an
+  existing base/draft shows a "missing required columns" panel with
+  per-column "Add field" / "Add all" (`renderFormSettingsEditor` options
+  `{ listColumns, defaultPageKey, requiredColumnCheck, onFieldsChanged }`).
+  `mapColumn` now captures Graph's `readOnly` so system required columns
+  are skipped. **461 tests** (82 `@skye/config` + 379 `@skye/app`;
+  `columnMapping.test.ts` new, `formSettingsEditor.test.ts` +5), type-check
+  clean, build verified, real-Chrome smoke (column→type auto-select;
+  new-form seed; delete a required field → panel appears → "Add field"
+  restores it). See "Form Config Builder" above.
 - ⬜ **Not yet started:** choosing and integrating a real editor library for
   `skye-richtext` (Tiptap suggested — the current element is intentionally
   minimal, not a partial attempt), `attachment`-mode file uploads (needs a
   second MSAL scope for the SharePoint REST API audience — a bigger change
   than one more Graph call), an ARIA pass on the now-functional components.
 - ⚠️ **Known gaps, not yet resolved (see TODO's "Newly discovered gaps"):**
-  MSAL popup→redirect fallback doesn't restore hash/form-state after the
-  round-trip; `searchSitesWithSkyeData`'s exact response shape assumptions
-  are untested against a live tenant; `PUBLIC_DEFAULT_APPLICATION_ID` (needed
-  for the site switcher when a URL has no applicationId at all) isn't
-  documented in any `.env.example` yet; auth overall is structurally
+  the MSAL popup→redirect fallback now recovers the ROUTE across the
+  round-trip (`lib/auth/redirectReturn.ts` — stash the pre-redirect URL,
+  finish the token exchange on the landing page, bounce back), but a
+  half-filled form's field values are still lost; `searchSitesWithSkyeData`'s
+  exact response shape assumptions are untested against a live tenant;
+  `.env.example` + `src/env.d.ts` now document the `PUBLIC_*` vars; auth
+  overall is structurally
   complete but untested against a live tenant.
 
 ## Commands

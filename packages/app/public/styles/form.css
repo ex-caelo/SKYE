@@ -1,0 +1,122 @@
+/* Minimal baseline — a design pass is a separate follow-up (see TODO §7). */
+
+body { font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; }
+
+/* Pages ship every state in the markup and toggle it with `hidden` (see lib/ui/pageState.ts) —
+   make sure nothing overrides that back to visible. */
+[hidden] { display: none !important; }
+
+.skye-form__tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid #ddd; }
+.skye-form__tabs button { padding: 0.5rem 1rem; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; }
+.skye-form__tab--active { border-bottom-color: #2563eb; font-weight: 600; }
+
+.skye-form__page { padding-bottom: 1rem; }
+
+.skye-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.skye-field > label, .skye-field legend { font-weight: 600; font-size: 0.9rem; }
+.skye-field fieldset { border: 1px solid #ddd; padding: 0.5rem 0.75rem; }
+.skye-field__subtitle, .skye-field__help { font-size: 0.8rem; color: #666; }
+.skye-field__message { font-size: 0.8rem; color: #b91c1c; min-height: 1em; }
+
+/* Field-level validation — only ever visible once a field has been touched (blurred) or a submit
+   was attempted (see renderForm.ts's validateAll/touchedFields), the same "don't flash red on a
+   pristine field" idea as CSS's own :user-invalid. Applied via our own .skye-field--invalid class
+   as the guaranteed, deterministic layer (driven directly by this app's own touchedFields
+   tracking, not a browser heuristic), styled identically across native inputs AND this app's
+   custom elements (skye-people-picker etc. — registerElements.ts's SkyeValueElement base class
+   now makes these real form-associated custom elements via attachInternals(), so :user-invalid
+   below is a free ADDITIONAL native/assistive-tech-facing layer on top of this class, not the
+   only thing driving the visible styling — kept deliberately identical to .skye-field--invalid's
+   own rules so the two can never visually disagree). The custom-element tag list here is the
+   actual set from fieldRegistry.ts — skye-calculated-display is deliberately excluded, since it's
+   a read-only derived display that's never itself validated (see validateFormValues.ts's own
+   skip list). */
+.skye-field--invalid input, .skye-field--invalid select, .skye-field--invalid textarea,
+input:user-invalid, select:user-invalid, textarea:user-invalid {
+  border-color: #b91c1c;
+  outline-color: #b91c1c;
+}
+.skye-field--invalid label { color: #b91c1c; }
+
+/* skye-richtext and skye-lookup-table have no single native input/select/textarea the rule above
+   already reaches (richtext's editor is a contenteditable div; a lookup table has one input per
+   row, not one for the whole field) — give the CUSTOM ELEMENT ITSELF a real border here instead,
+   since border-color alone (matching the rule above) wouldn't render without an actual
+   border/outline already set on it. skye-people-picker/skye-lookup-picker don't need an entry
+   here — their inner search <input> is already reached by the rule above. */
+.skye-field--invalid > skye-richtext, .skye-field--invalid > skye-lookup-table,
+skye-richtext:user-invalid, skye-lookup-table:user-invalid {
+  border: 1px solid #b91c1c;
+}
+
+/* checkbox appearance: "switch" (cosmetic only — see schema's `appearance` property) */
+input[type="checkbox"].skye-switch { width: 2.5rem; height: 1.4rem; appearance: none; background: #ccc; border-radius: 999px; position: relative; cursor: pointer; }
+input[type="checkbox"].skye-switch:checked { background: #2563eb; }
+input[type="checkbox"].skye-switch::before {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 1.1rem; height: 1.1rem;
+  background: white; border-radius: 50%; transition: transform 0.15s;
+}
+input[type="checkbox"].skye-switch:checked::before { transform: translateX(1.1rem); }
+
+/* --- new components: minimal, functional styling only --- */
+
+/* status regions are <output> (implicit role=status) — make them block-level like the old <div>s */
+.skye-form__status, .skye-add-site__status, .skye-create-assets__status { display: block; }
+.skye-form__status[data-level="error"] { color: #b91c1c; }
+.skye-form__status[data-level="warning"] { color: #b45309; }
+.skye-form__status[data-level="success"] { color: #15803d; }
+.skye-form__submit { margin-top: 1rem; padding: 0.5rem 1.25rem; }
+
+.skye-search-picker { position: relative; display: inline-block; width: 100%; }
+.skye-search-picker input { width: 100%; box-sizing: border-box; }
+.skye-search-picker__dropdown {
+  position: absolute; z-index: 10; left: 0; right: 0; margin: 0; padding: 0;
+  list-style: none; background: white; border: 1px solid #ccc; max-height: 12rem; overflow-y: auto;
+}
+.skye-search-picker__dropdown li { padding: 0.4rem 0.6rem; cursor: pointer; }
+.skye-search-picker__dropdown li:hover { background: #f0f4ff; }
+
+.skye-lookup-table table { border-collapse: collapse; width: 100%; margin-bottom: 0.5rem; }
+.skye-lookup-table th, .skye-lookup-table td { border: 1px solid #ddd; padding: 0.3rem; }
+
+.skye-richtext__toolbar-placeholder { display: flex; gap: 0.4rem; padding: 0.35rem; background: #f3f4f6; border: 1px solid #ccc; border-bottom: none; }
+.skye-richtext__toolbar-placeholder span { display: inline-block; width: 1.5rem; height: 1.2rem; background: #d1d5db; border-radius: 3px; }
+.skye-richtext__editor { border: 1px solid #ccc; min-height: 4rem; padding: 0.4rem; }
+
+.skye-form__draft-banner { background: #fef9c3; border: 1px solid #eab308; padding: 0.5rem 0.75rem; margin-bottom: 1rem; font-size: 0.9rem; }
+.skye-form__edit-link { display: inline-block; margin-bottom: 1rem; font-size: 0.85rem; }
+
+.skye-site-switcher ul { list-style: none; padding: 0; }
+.skye-site-switcher li { margin-bottom: 0.5rem; }
+.skye-site-switcher button { padding: 0.5rem 1rem; width: 100%; text-align: left; }
+.skye-picker-kind { color: #666; font-size: 0.8rem; margin-left: 0.4rem; }
+.skye-picker-create { margin-top: 1rem; padding: 0.5rem 1rem; }
+
+/* "Set up SKYE on another site" panel */
+.skye-add-site { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #ddd; }
+.skye-add-site h3 { font-size: 1rem; margin-bottom: 0.25rem; }
+.skye-add-site p { font-size: 0.85rem; color: #666; margin: 0 0 0.5rem; }
+.skye-add-site__form { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.skye-add-site__input { flex: 1 1 20rem; padding: 0.45rem 0.6rem; }
+.skye-add-site__button { padding: 0.45rem 1rem; }
+.skye-add-site__status { font-size: 0.85rem; min-height: 1.2em; margin-top: 0.5rem; }
+.skye-add-site__status[data-level="error"] { color: #b91c1c; }
+.skye-add-site__status[data-level="success"] { color: #15803d; }
+
+/* "Manage permissions" step, shown after a new site is set up */
+.skye-permissions-step p, .skye-create-assets p { max-width: 42rem; }
+.skye-permissions-step__link { display: inline-block; margin: 0.5rem 0 1rem; font-weight: 600; }
+.skye-permissions-step__done { display: block; padding: 0.5rem 1.25rem; }
+
+/* "Create Site Assets first" step */
+.skye-create-assets__link { display: inline-block; margin: 0.5rem 0 1rem; font-weight: 600; }
+.skye-create-assets__row { display: flex; gap: 0.5rem; list-style: none; margin: 0; padding: 0; }
+.skye-create-assets__row button { padding: 0.45rem 1rem; }
+.skye-create-assets__status { font-size: 0.85rem; min-height: 1.2em; margin-top: 0.5rem; }
+.skye-create-assets__status[data-level="error"] { color: #b91c1c; }
+
+/* diag.astro's results table — reuses the same data-level color convention as .skye-form__status */
+table { border-collapse: collapse; width: 100%; margin-top: 1.5rem; font-size: 0.9rem; }
+th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+td[data-level="success"] { color: #15803d; }
+td[data-level="error"] { color: #b91c1c; }

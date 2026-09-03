@@ -1,0 +1,30 @@
+---
+// The form page: create/edit/view are all this one page, distinguished by
+// the hash's mode segment (see lib/routing/router.ts) — `view` is an
+// app-level render flag, not a separate route (see TODO §3), so it doesn't
+// get a separate page either. If the route can't be resolved (no siteId
+// yet), entry-form.ts redirects to /switcher rather than rendering here.
+// entry-form.ts owns the logic; the form itself is built from its config
+// by renderForm.ts and mounted into #screen-form's slot.
+import BaseLayout from "../layouts/BaseLayout.astro";
+import ConfirmDialog from "../components/ConfirmDialog.astro";
+---
+
+<BaseLayout title="SKYE — Form">
+  <p data-state id="skye-loading" role="status">Loading…</p>
+
+  <section data-state id="screen-form" hidden>
+    <a class="skye-form__edit-link" data-el="edit-link" hidden></a>
+    <aside class="skye-form__draft-banner" data-slot="draft-banner" hidden></aside>
+    <div data-slot="form-mount"></div>
+    <output class="skye-form__status" data-el="status"></output>
+  </section>
+
+  <section data-state id="state-error" hidden>
+    <p>Something went wrong loading this form. Check the console for details.</p>
+  </section>
+
+  <ConfirmDialog />
+
+  <script src="../page-scripts/form.ts"></script>
+</BaseLayout>

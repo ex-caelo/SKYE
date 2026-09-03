@@ -1,0 +1,36 @@
+---
+// The Custom View page. Loads one sandboxed, author-written view by id
+// from the hash (`/view?siteId=&applicationId=&tenantId=#{viewId}`). All
+// real work is in entry-view.ts; this file owns the state markup, the
+// shared stylesheet, and the top-level-page CSP.
+import BaseLayout from "../layouts/BaseLayout.astro";
+import "../features/custom-views/view.css";
+---
+
+<BaseLayout title="SKYE — View" styles={[]}>
+  <!--
+    frame-src 'self' is the top-level-page half of the isolation model
+    (CUSTOM-VIEWS-SPEC.md §3.7): the sandbox attribute alone does not stop
+    a view navigating its OWN frame to an external URL — this does. A real
+    deployment should also send this, plus frame-ancestors, as an HTTP
+    response header (outside Astro static output's control).
+  -->
+  <meta slot="head" http-equiv="Content-Security-Policy" content="frame-src 'self'" />
+
+  <p data-state id="skye-loading" role="status">Loading…</p>
+
+  <section data-state id="screen-view" hidden>
+    <div data-slot="view-mount"></div>
+  </section>
+
+  <section data-state id="state-not-configured" class="skye-view__message" hidden>
+    <h1 data-slot="title"></h1>
+    <p data-slot="body"></p>
+  </section>
+
+  <section data-state id="state-error" class="skye-view__message" hidden>
+    <p>Something went wrong loading this view. Check the console for details.</p>
+  </section>
+
+  <script src="../page-scripts/view.ts"></script>
+</BaseLayout>

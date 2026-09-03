@@ -6,7 +6,7 @@
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
-    "test:config": "turbo run test --filter=@skye/config",
+    "test:config": "turbo run test --filter=@skye/form-config",
     "test:watch": "turbo run test:watch",
     "typecheck": "turbo run typecheck",
     "dev": "turbo run dev",

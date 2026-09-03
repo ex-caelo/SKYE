@@ -1,0 +1,93 @@
+---
+// The form-config builder: create/edit skye_data/forms/[id]/form.config.json
+// (and its [permission] overlays and drafts) without hand-writing JSON.
+// entry-builder.ts owns the logic and picks which screen below is visible;
+// the data-driven bits (live preview, schema-driven property editor,
+// save-review diff) are still built in TS and mounted into the slots here.
+import BaseLayout from "../layouts/BaseLayout.astro";
+import SitePicker from "../components/SitePicker.astro";
+import FormPicker from "../components/FormPicker.astro";
+import MessagePanel from "../components/MessagePanel.astro";
+import ConfirmDialog from "../components/ConfirmDialog.astro";
+---
+
+<BaseLayout title="SKYE — Form Builder" styles={["/styles/form.css", "/styles/builder.css"]}>
+  <p data-state id="skye-loading" role="status">Loading…</p>
+
+  <SitePicker />
+
+  <FormPicker>
+    <details class="skye-builder__new-form" data-el="new-form" open>
+      <summary><h2>Or start a new form</h2></summary>
+      <form data-el="new-form-form">
+        <input data-el="new-form-id" type="text" placeholder="new form id (e.g. event-signup)" />
+        <select class="skye-builder__new-form-list" data-el="new-form-list"></select>
+        <input data-el="new-form-manual-id" type="text" placeholder="target SharePoint list id (GUID)" hidden />
+        <input data-el="new-form-site-id" type="text" placeholder="list's siteId, if it's on a different site (optional)" />
+        <button data-el="new-form-create" type="submit">Create</button>
+        <span class="skye-builder__new-form-error" data-el="new-form-error"></span>
+      </form>
+    </details>
+  </FormPicker>
+
+  <MessagePanel />
+
+  <section data-state id="screen-builder" hidden>
+    <header class="skye-builder__topbar">
+      <h1 data-slot="form-id"></h1>
+
+      <label>View <select data-el="view-select"></select></label>
+
+      <input data-el="add-view-input" type="text" placeholder="new permission overlay name" />
+      <button data-el="add-view-btn" type="button">+ Add view</button>
+
+      <input data-el="add-draft-input" type="text" placeholder="new draft name" />
+      <button data-el="add-draft-btn" type="button">+ New draft</button>
+
+      <button data-el="copy-link-btn" type="button" hidden>Copy preview link</button>
+      <button data-el="publish-btn" type="button" hidden>Publish this draft → becomes base</button>
+      <button data-el="save-btn" class="skye-builder__save" type="button">Save this view</button>
+
+      <output class="skye-form__status" data-el="status"></output>
+      <ul class="skye-builder__errors" data-slot="errors"></ul>
+      <template data-tpl="error-row"><li></li></template>
+    </header>
+
+    <div class="skye-builder__split">
+      <section class="skye-builder__preview-pane" data-slot="preview" aria-label="Live preview"></section>
+      <section class="skye-builder__editor-pane" data-slot="editor" aria-label="Property editor"></section>
+    </div>
+
+    <template data-tpl="add-field">
+      <div class="skye-builder__add-field">
+        <label>Source
+          <select data-el="source">
+            <option value="sharepoint">SharePoint column</option>
+            <option value="virtual">Virtual (not saved to SharePoint)</option>
+          </select>
+        </label>
+        <label data-el="bind-row">Bind to
+          <select data-el="bindTo"></select>
+        </label>
+        <input data-el="key" type="text" placeholder="field key" />
+        <label>Type <select data-el="type"></select></label>
+        <label>Page <select data-el="page"></select></label>
+        <button data-el="add" type="button">+ Add field</button>
+        <span data-el="error"></span>
+      </div>
+    </template>
+  </section>
+
+  <section data-state id="state-config-missing" hidden>
+    <h1>Couldn't open the builder</h1>
+    <p>No application is configured. Set <code>PUBLIC_DEFAULT_APPLICATION_ID</code> or include <code>?applicationId=</code> in the URL.</p>
+  </section>
+
+  <section data-state id="state-error" hidden>
+    <p>Something went wrong loading the builder. Check the console for details.</p>
+  </section>
+
+  <ConfirmDialog />
+
+  <script src="../page-scripts/builder.ts"></script>
+</BaseLayout>

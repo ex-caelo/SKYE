@@ -11,7 +11,7 @@ interface Props {
   /** Stylesheet hrefs to link, in order. Defaults to just the shared form styles. */
   styles?: string[];
 }
-const { title, styles = ["/styles/form.css"] } = Astro.props;
+const { title, styles = ["/styles/bootstrap.css", "/styles/form.css"] } = Astro.props;
 ---
 
 <!doctype html>

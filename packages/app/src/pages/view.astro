@@ -4,6 +4,7 @@
 // real work is in entry-view.ts; this file owns the state markup, the
 // shared stylesheet, and the top-level-page CSP.
 import BaseLayout from "../layouts/BaseLayout.astro";
+import Loading from "../components/Loading.astro";
 import "../features/custom-views/view.css";
 ---
 
@@ -17,7 +18,9 @@ import "../features/custom-views/view.css";
   -->
   <meta slot="head" http-equiv="Content-Security-Policy" content="frame-src 'self'" />
 
-  <p data-state id="skye-loading" role="status">Loading…</p>
+  <div data-state id="skye-loading" role="status">
+    <Loading label="Loading View..."></Loading>
+  </div>
 
   <section data-state id="screen-view" hidden>
     <div data-slot="view-mount"></div>

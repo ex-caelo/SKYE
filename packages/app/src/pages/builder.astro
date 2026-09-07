@@ -12,11 +12,11 @@ import ConfirmDialog from "../components/ConfirmDialog.astro";
 import Loading  from "../components/Loading.astro";
 ---
 
-<BaseLayout title="SKYE — Form Builder" styles={["/styles/form.css", "/styles/builder.css"]}>
+<BaseLayout title="SKYE — Form Builder" styles={["/styles/bootstrap.css", "/styles/form.css", "/styles/builder.css"]}>
   
-  <Fragment data-state id="skye-loading" role="status">
+  <div data-state id="skye-loading" role="status">
     <Loading label="Loading Builder..."></Loading>
-  </Fragment>
+  </div>
 
   <SitePicker />
 

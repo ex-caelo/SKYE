@@ -11,10 +11,13 @@ import FormOrViewPicker from "../components/FormOrViewPicker.astro";
 import PermissionsStep from "../components/PermissionsStep.astro";
 import CreateSiteAssetsStep from "../components/CreateSiteAssetsStep.astro";
 import ConfirmDialog from "../components/ConfirmDialog.astro";
+import Loading from "../components/Loading.astro";
 ---
 
 <BaseLayout title="SKYE — Choose a site">
-  <p data-state id="skye-loading" role="status">Loading…</p>
+  <div data-state id="skye-loading" role="status">
+    <Loading label="Loading Sites and Forms..."></Loading>
+  </div>
 
   <SitePicker>
     <AddSitePanel />

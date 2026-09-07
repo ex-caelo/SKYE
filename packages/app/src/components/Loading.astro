@@ -15,37 +15,35 @@ const { label = "Loading..." } = Astro.props;
 
 
 <style>
-    .loader-container {
-        display: flex;
-        justify-self: center;
-        align-self: center;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-    }
+.loader {
+  --color-1: rgb(77 150 205);
+  --size: .75px;
+  width: calc(48 * var(--size));
+  height: calc(48 * var(--size));
+  border: calc(5 * var(--size)) solid var(--color-1);
+  border-bottom-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  box-sizing: border-box;
+  animation: rotation 1s linear infinite;
+}
 
-    .loader {
-    width: 45px;
-    height: 30px;
-    animation: l1 2s infinite linear;
-    }
-    @keyframes l1{
-    0%,
-    25%  {background:
-            linear-gradient(#e50021 0 0) 50% 0/66% 100% no-repeat}
-    25.1%,
-    50%  {background:
-            linear-gradient(#004ce4 0 0) 0 0/100% 50% no-repeat,
-            linear-gradient(#004ce4 0 0) 0 0/33% 100% no-repeat}
-    50.1%,
-    75%  {background:
-            linear-gradient(#00e622 0 0) 100% 0/66% 50% no-repeat,
-            linear-gradient(#00e622 0 0) 0 100%/66% 50% no-repeat}
-    75.1%,
-    100% {background:
-            linear-gradient(#9d0be6 0 0) 0 100%/100% 50% no-repeat,
-            linear-gradient(#9d0be6 0 0) 50% 0 /33%  50% no-repeat}
-    }
+@keyframes rotation {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.loader-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        margin: 10px;
+}
 </style>
 
 

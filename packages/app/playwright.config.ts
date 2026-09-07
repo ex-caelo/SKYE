@@ -31,5 +31,11 @@ export default defineConfig({
     url: "http://localhost:4321",
     reuseExistingServer: false,
     timeout: 60_000,
+    // Astro 7's CLI auto-detects an "AI agent" environment and daemonizes
+    // `astro preview` (the foreground process then exits, and Playwright
+    // sees the web server "exit before becoming ready"). Setting this env
+    // var opts out of that detection, keeping preview in the foreground
+    // where Playwright manages its lifecycle.
+    env: { ASTRO_PREVIEW_BACKGROUND: "1" },
   },
 });

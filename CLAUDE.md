@@ -856,9 +856,10 @@ at the bottom). In brief, as of the last restructure:
   `/builder` (schema-driven, with draft/publish and a save-review diff),
   `/view` Custom Views sandbox (browser security gate green), and
   `/diag`; MSAL auth incl. single-tenant self-heal and redirect-flow
-  route recovery; site provisioning into Site Assets. ~479 tests
-  (`@skye/form-config` + `@skye/app`), type-check clean, Astro build of
-  all pages, `test:views:browser` green.
+  route recovery; site provisioning into Site Assets. 479 tests (82
+  `@skye/form-config` + 397 `@skye/app`), type-check clean (TypeScript 7),
+  Astro 7 build of all pages, `test:views:browser` green — all verified on
+  the modernized toolchain (see "Toolchain versions" above).
 - **Not yet done:** a real rich-text editor for `skye-richtext`,
   `attachment`-mode file uploads (needs a second MSAL scope), an ARIA
   pass on the functional components.
@@ -868,6 +869,51 @@ at the bottom). In brief, as of the last restructure:
   (structurally complete, never run against real Entra/SharePoint). A
   half-filled form's values are still lost across an MSAL redirect
   round-trip (only the route is recovered).
+
+## Toolchain versions
+
+As of the 2026-09 dependency modernization the repo is on the current
+major of everything: **Astro 7** (Vite 7 under it), **Vitest 5**, **jsdom
+30**, **TypeScript 7** (the native compiler), **@azure/msal-browser 5**,
+Turbo 2.10, tsx 4.23, ajv 8.20. `@microsoft/microsoft-graph-client`,
+`@playwright/test`, and `invokers-polyfill` were already current.
+
+- **Node**: the toolchain needs **Node ≥ 22.12** (enforced by
+  `engines.node` in the root `package.json`, pinned for version managers
+  by `.node-version`). Older Node 4.x-era-ish setups are fine; the trap is
+  the *other* direction — Astro 4 / Vitest 2 hard-hang or crawl on Node
+  26, which is what forced this upgrade. Astro 7 / Vitest 5 run cleanly on
+  Node 26.
+- **`packages/app/vitest.config.ts` sets `pool: "threads"`.** Vitest's
+  default `forks` pool spins up a fresh Node process per test file and
+  stands up jsdom inside it — ~7s each here, which trips the worker-
+  startup timeout on a chunk of the suite. Threads share the process
+  (jsdom's native bits load once) and still give each file an isolated
+  environment. The full app suite runs in ~8s this way.
+- **`packages/form-config` builds via `tsconfig.build.json`** (extends
+  `tsconfig.json`, excludes `*.test.ts` / `__tests__/`). Vitest 5 no
+  longer excludes `dist/` by default, so without this the compiled test
+  copies in `dist/` got discovered and every form-config test ran twice.
+  `form-config/vitest.config.ts` also carries an explicit `exclude` list
+  with a `dist/` guard as belt-and-braces.
+- **MSAL 5**: `navigateToLoginRequestUrl` moved off the `Configuration.auth`
+  block onto `handleRedirectPromise({ navigateToLoginRequestUrl: false })`
+  (see `shared/auth/redirectReturn.ts`). The auth flow is otherwise
+  unchanged and still **unverified against a live tenant** — MSAL 3→5
+  behavioral changes need real-Entra testing when that's possible.
+- **jsdom 30** implements `<dialog>.showModal()` and
+  `ElementInternals`'s Constraint Validation API, which jsdom 25 did not.
+  The feature-detected fallbacks in `shared/ui/confirmDialog.ts` and
+  `features/form/registerElements.ts` (their comments still say "jsdom <
+  26" / "jsdom 25") are now inert but harmless — leave them for anyone on
+  an older jsdom.
+- **`astro dev` / `astro preview` in Astro 7 auto-detect an "AI agent"
+  shell** (via `am-i-vibing`) and daemonize, switching to JSON logs
+  (`astro dev stop|status|logs` to manage one). A normal user terminal is
+  unaffected — `pnpm dev` runs in the foreground as before. The Playwright
+  gate sets `ASTRO_PREVIEW_BACKGROUND=1` in its `webServer.env` to opt out
+  (otherwise the foreground process exits and Playwright sees the server
+  "exit before becoming ready").
 
 ## Commands
 
@@ -880,22 +926,21 @@ TURBO` in the output).
 ```bash
 pnpm install                          # install all workspace deps
 pnpm build                            # turbo run build  — builds both packages, cached
-pnpm test                             # turbo run test   — runs every package's test suite (369 tests total), in parallel
-pnpm test:config                      # turbo run test --filter=@skye/form-config — just @skye/form-config's 40 tests
+pnpm test                             # turbo run test   — runs every package's test suite (479 tests total), in parallel
+pnpm test:config                      # turbo run test --filter=@skye/form-config — just @skye/form-config's 82 tests
 pnpm typecheck                        # turbo run typecheck — tsc --noEmit across both packages
 pnpm lint:configs -- <path>           # turbo run lint:configs -- <path> — validate + additive-lint a local skye_data/forms/ checkout
 pnpm dev                              # turbo run dev — starts packages/app's dev server (persistent, not cached)
 
 # Custom Views browser regression gate (Playwright + system Chrome; not part
 # of `turbo run test` — needs a browser + a preview server):
-cd src/app && pnpm test:views:browser
+cd packages/app && pnpm test:views:browser
 
 # Reach for pnpm --filter directly only when you want just one package
 # without going through turbo, e.g.:
 pnpm --filter @skye/app test
 
-# from src/app (actual path — the workspace glob is src/*, not packages/*),
-# for PUBLIC_MOCK_GRAPH-specific runs:
+# from packages/app, for PUBLIC_MOCK_GRAPH-specific runs:
 PUBLIC_MOCK_GRAPH=1 pnpm dev
 PUBLIC_MOCK_GRAPH=1 pnpm build
 ```

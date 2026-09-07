@@ -1,6 +1,27 @@
 /* Minimal baseline — a design pass is a separate follow-up (see TODO §7). */
 
-body { font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; }
+* {
+  box-sizing: border-box;
+}
+
+body { 
+  font-family: system-ui, sans-serif; 
+  margin: 2rem; 
+  color: #1a1a1a;
+  background-image: url('/assets/skye.webp');
+  background-size: cover;
+  height: 100svh;
+}
+
+#skye-app {
+  background: white;
+  padding: 20px 30px;
+  border-radius: 8px;
+  max-height: calc(110svh - 4rem);
+}
+
+
+
 
 /* Pages ship every state in the markup and toggle it with `hidden` (see lib/ui/pageState.ts) —
    make sure nothing overrides that back to visible. */

@@ -5,11 +5,15 @@ authored in a `skye_data/` folder on the SharePoint site itself — no code
 deploy needed to add or change a form. Built to prioritise ease-of-editing
 for non-developers and structural consistency across every config.
 
-**New here? Read [`ARCHITECTURE.md`](ARCHITECTURE.md).** It's one page: the
-two packages, the app layout, the invariants, and the URL scheme.
-[`CLAUDE.md`](CLAUDE.md) has the conventions and the Graph-permissions
-reference; [`docs/`](docs/) has the build log, handoff, and Custom Views
-spec.
+**Adopting SKYE on a SharePoint site?** See
+[`docs/setup-guide.md`](docs/setup-guide.md) — the non-technical
+click-through (you use the hosted app; you don't host anything).
+
+**Working on the code?** Read [`ARCHITECTURE.md`](ARCHITECTURE.md) — one
+page: the two packages, the app layout, the invariants, and the URL
+scheme. [`CLAUDE.md`](CLAUDE.md) has the conventions and the
+Graph-permissions reference; [`docs/`](docs/) has the build log, handoff,
+and Custom Views spec.
 
 ## Repo map
 
@@ -35,6 +39,10 @@ Tasks run through **Turborepo** — root `pnpm build|test|typecheck|dev|lint:con
 wrap `turbo run <task>` (parallel + cached across the two packages).
 
 ## Getting started
+
+Needs **Node ≥ 22.12** (`.node-version` pins it for `fnm`/`nvm`). The
+toolchain is Astro 7 / Vitest 5 / TypeScript 7 — see "Toolchain versions"
+in [`CLAUDE.md`](CLAUDE.md).
 
 ```bash
 pnpm install

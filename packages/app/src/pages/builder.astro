@@ -9,10 +9,14 @@ import SitePicker from "../components/SitePicker.astro";
 import FormPicker from "../components/FormPicker.astro";
 import MessagePanel from "../components/MessagePanel.astro";
 import ConfirmDialog from "../components/ConfirmDialog.astro";
+import Loading  from "../components/Loading.astro";
 ---
 
 <BaseLayout title="SKYE — Form Builder" styles={["/styles/form.css", "/styles/builder.css"]}>
-  <p data-state id="skye-loading" role="status">Loading…</p>
+  
+  <Fragment data-state id="skye-loading" role="status">
+    <Loading label="Loading Builder..."></Loading>
+  </Fragment>
 
   <SitePicker />
 

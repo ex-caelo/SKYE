@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.23.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
@@ -13,7 +16,7 @@
     "lint:configs": "turbo run lint:configs --"
   },
   "devDependencies": {
-    "turbo": "^2.10.11",
-    "typescript": "^5.6.0"
+    "turbo": "^2.10.12",
+    "typescript": "^7.0.2"
   }
 }

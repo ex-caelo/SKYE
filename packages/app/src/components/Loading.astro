@@ -1,0 +1,51 @@
+---
+import { properties } from 'astro:schema';
+
+interface Props {
+  label: string;
+}
+
+const { label = "Loading..." } = Astro.props;
+---
+
+<div class="loader-container">
+    <div class="loader"></div>
+    <p>{label}</p>
+</div>
+
+
+<style>
+    .loader-container {
+        display: flex;
+        justify-self: center;
+        align-self: center;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .loader {
+    width: 45px;
+    height: 30px;
+    animation: l1 2s infinite linear;
+    }
+    @keyframes l1{
+    0%,
+    25%  {background:
+            linear-gradient(#e50021 0 0) 50% 0/66% 100% no-repeat}
+    25.1%,
+    50%  {background:
+            linear-gradient(#004ce4 0 0) 0 0/100% 50% no-repeat,
+            linear-gradient(#004ce4 0 0) 0 0/33% 100% no-repeat}
+    50.1%,
+    75%  {background:
+            linear-gradient(#00e622 0 0) 100% 0/66% 50% no-repeat,
+            linear-gradient(#00e622 0 0) 0 100%/66% 50% no-repeat}
+    75.1%,
+    100% {background:
+            linear-gradient(#9d0be6 0 0) 0 100%/100% 50% no-repeat,
+            linear-gradient(#9d0be6 0 0) 50% 0 /33%  50% no-repeat}
+    }
+</style>
+
+

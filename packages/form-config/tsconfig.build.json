@@ -1,0 +1,8 @@
+{
+  // Emit-only variant used by `pnpm build`: same settings as tsconfig.json
+  // but keeps the *.test.ts files and the __tests__/ helpers out of dist/,
+  // so the published output is just the library. `pnpm typecheck` still
+  // uses tsconfig.json, which includes the tests.
+  "extends": "./tsconfig.json",
+  "exclude": ["src/**/*.test.ts", "src/__tests__/**"]
+}

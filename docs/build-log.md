@@ -987,6 +987,61 @@ class standing in for it.
   deleting a required field made the panel appear ("1 required SharePoint
   column has no field…"), and its "Add field" restored it.
 
+## 21. Dependency modernization — Astro 7 / Vitest 5 / TS 7 / MSAL 5 (new pass, 2026-09)
+
+Triggered by a user report that `PUBLIC_MOCK_GRAPH=1 pnpm dev` printed
+nothing: on the machine's Homebrew **Node 26**, Astro 4's ESM config
+loader hangs outright (infinite constructor recursion in a startup
+dynamic `import()`, confirmed via `sample`) and Vitest 2 crawls (65s for
+82 tests). The fix was to move the whole toolchain to its current major.
+
+- [x] **Versions bumped to latest.** `astro` 4.16 → **7.3.1** (Vite 7
+  under it), `vitest` 2.1 → **5.0.0**, `jsdom` 25 → **30.0.1**, `typescript`
+  5.6 → **7.0.2** (native compiler), `@azure/msal-browser` 3.27 → **5.21.0**,
+  `turbo` → 2.10.12, `tsx` → 4.23.13, `ajv` → 8.20.0. Unchanged (already
+  current): `@microsoft/microsoft-graph-client` 3.0.7, `@playwright/test`
+  1.62.1, `invokers-polyfill` 1.0.4. Root `engines.node` set to
+  `>=22.12.0`; new `.node-version` pins it.
+- [x] **Astro 7 app is a near-no-op migration** — the app has no
+  integrations, no adapter, no content collections, no `getStaticPaths`,
+  no `Astro.glob`; `output: "static"` is still valid. Only Astro API used
+  is `Astro.props` + `import.meta.env.PUBLIC_*`. Build, dev, and all 7
+  routes verified.
+- [x] **MSAL 5**: the one code change. `navigateToLoginRequestUrl` was
+  removed from `Configuration.auth` and now lives on
+  `handleRedirectPromise({ navigateToLoginRequestUrl: false })` — moved in
+  `shared/auth/redirectReturn.ts`. Auth is otherwise untouched and still
+  unverified against a live tenant (MSAL 3→5 behavior changes need real
+  Entra).
+- [x] **Vitest 5: `pool: "threads"`** in `packages/app/vitest.config.ts`.
+  The default `forks` pool forks a Node process per file and builds jsdom
+  inside it (~7s each), tripping the worker-startup timeout on ~11 of 45
+  files ("Failed to start forks worker … Timeout waiting for worker to
+  respond"). Threads share the process; the full app suite then runs in
+  ~8s, all 397 tests passing.
+- [x] **Vitest 5 stopped excluding `dist/` by default**, so `form-config`'s
+  `tsc`-compiled `dist/__tests__/*.test.js` copies got discovered and
+  every test ran twice (13 files → "26", 82 → "164"). Fixed both ways: a
+  new `packages/form-config/tsconfig.build.json` (extends `tsconfig.json`,
+  excludes `*.test.ts` + `__tests__/`) that `build` now points at, and an
+  explicit `exclude` list with a `dist/` guard in
+  `form-config/vitest.config.ts`.
+- [x] **jsdom 30** now implements `<dialog>.showModal()` and
+  `ElementInternals`'s Constraint Validation API (jsdom 25 didn't). The
+  feature-detected fallbacks in `shared/ui/confirmDialog.ts` and
+  `features/form/registerElements.ts` are now inert but harmless — left in
+  place.
+- [x] **Astro 7 `astro dev`/`astro preview` daemonize under AI-agent
+  detection** (`am-i-vibing`), switching to JSON logs. Harmless for a
+  human terminal (`pnpm dev` stays foreground). The Playwright gate needed
+  `ASTRO_PREVIEW_BACKGROUND=1` in `webServer.env` so preview stays
+  foreground and Playwright can manage it. `.gitignore` gained `.astro/`
+  (Astro 7 writes generated types + a dev/preview lock there).
+- **479 tests green** (82 `@skye/form-config` + 397 `@skye/app`), both
+  packages type-check clean on TS 7, `pnpm build` builds all 7 pages,
+  `pnpm test:views:browser` green (3/3, every security probe BLOCKED),
+  `pnpm install --frozen-lockfile` consistent. All via `turbo run <task>`.
+
 ---
 
 **Status:** Everything through §12 is now done except the items explicitly called out as open below — schema, `packages/skye-config`, `MOCK_GRAPH` fixtures, the `packages/app` render layer, the submit/postAction pipeline, real Web Component implementations, `calculatedDisplay` reactivity, etag-conflict UX, lookupTable row deletion, the site switcher (Graph `/search/query`, exact-match filtering to `skye_data` folders), file uploads (`library` mode; `attachment` mode deliberately unimplemented with an honest explanation), and Turborepo task orchestration (§15) — **97 tests passing across both packages** (40 in `@skye/config`, 57 in `@skye/app`), both type-check clean, and a full Astro production build succeeds, all runnable via `turbo run <task>` with confirmed caching. `skye-richtext` was deliberately simplified to a minimal HTML/CSS-only placeholder (no `execCommand`, no formatting logic) per explicit instruction, replacing an earlier toolbar implementation. **Remaining open items** (see §13 and "Newly discovered gaps" above): an ARIA pass on the now-functional components, choosing and integrating a real editor library for `skye-richtext`, MSAL redirect-fallback state recovery, and verifying `searchSitesWithSkyeData`/list-column caching/etc. against a real tenant. See `CLAUDE.md` for the running summary and repo conventions.

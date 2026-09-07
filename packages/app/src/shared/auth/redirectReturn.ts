@@ -83,14 +83,15 @@ export async function completeRedirectReturn(): Promise<boolean> {
         clientId,
         authority: `https://login.microsoftonline.com/${tenantId ?? "common"}`,
         redirectUri: window.location.origin,
-        // We navigate back ourselves, deterministically — don't let MSAL race us to it.
-        navigateToLoginRequestUrl: false,
       },
       cache: { cacheLocation: "sessionStorage" },
     });
     try {
       await msal.initialize();
-      const result = await msal.handleRedirectPromise();
+      // We navigate back ourselves, deterministically — don't let MSAL race us
+      // to it. As of @azure/msal-browser v5 this moved off the `auth` config
+      // block onto handleRedirectPromise's options argument.
+      const result = await msal.handleRedirectPromise({ navigateToLoginRequestUrl: false });
       // `state` was set to the pre-redirect href in authProvider.ts — use it if the stash is gone.
       if (!returnHref && result?.state && /^https?:\/\//.test(result.state)) returnHref = result.state;
     } catch (err) {

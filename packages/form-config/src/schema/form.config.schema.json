@@ -326,6 +326,11 @@
       "description": "Where a 'file' controlType field's uploads are stored. Defaults to 'attachment' (uploads attach directly to the primary list item) when omitted.",
       "properties": {
         "target": { "enum": ["attachment", "library"], "default": "attachment" },
+        "fileNameTemplate": {
+          "type": "string",
+          "description": "Optional. Renames the uploaded file instead of keeping the name it had on the uploader's disk. Supports {{fields.<key>}} placeholders (the field's raw value) and {{date:<key>}} (a date/datetime field value formatted as YYYY.MM.DD). The original file's extension is always preserved, and characters not allowed in a file name are collapsed to spaces. Example: \"{{date:startTime}} {{fields.eventTitle}} Poster\" produces \"2026.03.14 Spring Hackathon Poster.png\". Only applies when the upload actually happens (currently target: 'library').",
+          "minLength": 1
+        },
         "library": {
           "type": "object",
           "description": "Required when target is 'library'.",

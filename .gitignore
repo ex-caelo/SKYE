@@ -156,3 +156,9 @@ vite.config.ts.timestamp-*
 
 # Astro generated types + dev/preview server lockfiles
 .astro/
+# Temporary local Playwright form-driver (throwaway test harness, not part of the app)
+packages/app/_drive-form.mjs
+
+packages/app/_drive-switcher.mjs
+
+packages/app/_drive-full.mjs

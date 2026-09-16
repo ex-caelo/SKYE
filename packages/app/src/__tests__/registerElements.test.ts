@@ -5,7 +5,7 @@ import type { LookupTable } from "@skye/form-config";
 beforeAll(() => registerElements());
 
 describe("Constraint Validation participation (SkyeValueElement base class)", () => {
-  const controlTags = ["skye-people-picker", "skye-lookup-picker", "skye-lookup-table", "skye-richtext", "skye-calculated-display"];
+  const controlTags = ["skye-people-picker", "skye-multi-select", "skye-lookup-picker", "skye-lookup-table", "skye-richtext", "skye-calculated-display"];
 
   it("every SKYE custom element is form-associated", () => {
     for (const tag of controlTags) {
@@ -60,7 +60,7 @@ describe("skye-people-picker", () => {
     el.remove();
   });
 
-  it("selecting a search result sets .value to the result's id and emits skye-change", () => {
+  it("adds each picked person as a discrete chip; .value is a string[] of keys (email preferred)", () => {
     const el = document.createElement("skye-people-picker") as HTMLElement & {
       value: unknown;
       setResults: (r: unknown[]) => void;
@@ -70,12 +70,76 @@ describe("skye-people-picker", () => {
     const changeHandler = vi.fn();
     el.addEventListener("skye-change", changeHandler);
 
-    el.setResults([{ id: "person-1", displayName: "Alex Chen", email: "alex@example.com" }]);
-    const option = el.querySelector("li")!;
-    option.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    el.setResults([
+      { id: "person-1", displayName: "Alex Chen", email: "alex@example.com" },
+      { id: "person-2", displayName: "Jordan Rivera", email: "jordan@example.com" },
+    ]);
+    el.querySelectorAll("li")[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
 
-    expect(el.value).toBe("person-1");
+    expect(el.value).toEqual(["alex@example.com"]);
+    expect(el.querySelectorAll(".skye-token")).toHaveLength(1);
     expect(changeHandler).toHaveBeenCalledTimes(1);
+
+    // A second pick appends — it doesn't replace.
+    el.setResults([{ id: "person-2", displayName: "Jordan Rivera", email: "jordan@example.com" }]);
+    el.querySelector("li")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(el.value).toEqual(["alex@example.com", "jordan@example.com"]);
+    expect(el.querySelectorAll(".skye-token")).toHaveLength(2);
+
+    // Removing a chip drops just that person.
+    (el.querySelectorAll(".skye-token__remove")[0] as HTMLButtonElement).click();
+    expect(el.value).toEqual(["jordan@example.com"]);
+    expect(el.querySelectorAll(".skye-token")).toHaveLength(1);
+    el.remove();
+  });
+
+  it("normalises an externally-set value (SharePoint person objects) into chips", () => {
+    const el = document.createElement("skye-people-picker") as HTMLElement & { value: unknown };
+    document.body.appendChild(el);
+    el.value = [{ Email: "sam@example.com", LookupValue: "Sam Patel" }];
+    expect(el.querySelectorAll(".skye-token")).toHaveLength(1);
+    expect(el.querySelector(".skye-token")!.textContent).toContain("Sam Patel");
+    el.remove();
+  });
+});
+
+describe("skye-multi-select", () => {
+  function make(options: Array<{ value: string; label?: string }>) {
+    const el = document.createElement("skye-multi-select") as HTMLElement & { value: unknown; options: unknown };
+    el.options = options;
+    document.body.appendChild(el);
+    return el;
+  }
+
+  it("opens on trigger click and toggles options into a string[] value", () => {
+    const el = make([
+      { value: "a", label: "Alpha" },
+      { value: "b", label: "Beta" },
+    ]);
+    const changeHandler = vi.fn();
+    el.addEventListener("skye-change", changeHandler);
+
+    const trigger = el.querySelector(".skye-multi-select__trigger") as HTMLButtonElement;
+    trigger.click();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+
+    const [alpha, beta] = Array.from(el.querySelectorAll<HTMLInputElement>('.skye-multi-select__option input[type="checkbox"]'));
+    alpha.checked = true;
+    alpha.dispatchEvent(new Event("change"));
+    beta.checked = true;
+    beta.dispatchEvent(new Event("change"));
+
+    expect(el.value).toEqual(["a", "b"]);
+    expect(changeHandler).toHaveBeenCalledTimes(2);
+    expect(el.querySelector(".skye-multi-select__trigger")!.textContent).toContain("Alpha, Beta");
+  });
+
+  it("accepts a joined string as an externally-set value and splits it", () => {
+    const el = make([{ value: "a" }, { value: "b" }, { value: "c" }]);
+    el.value = "a; c";
+    expect(el.value).toEqual(["a", "c"]);
+    const boxes = Array.from(el.querySelectorAll<HTMLInputElement>('.skye-multi-select__option input[type="checkbox"]'));
+    expect(boxes.map((b) => b.checked)).toEqual([true, false, true]);
     el.remove();
   });
 });

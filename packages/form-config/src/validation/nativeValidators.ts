@@ -18,7 +18,11 @@ const DEFAULT_MESSAGES: Record<string, string> = {
 };
 
 function isEmpty(value: unknown): boolean {
-  return value === undefined || value === null || value === "";
+  if (value === undefined || value === null || value === "") return true;
+  // A multi-value control (people picker, multi-select) reports its value as an array — an empty
+  // one is "nothing chosen", so a `required` such field with `[]` must fail like an empty text box.
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
 }
 
 /**

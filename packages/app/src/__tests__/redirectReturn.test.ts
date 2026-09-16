@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
-import { isRedirectResponseHash, rememberRedirectReturn, completeRedirectReturn } from "../shared/auth/redirectReturn.js";
+import {
+  isRedirectResponseHash,
+  rememberRedirectReturn,
+  forgetRedirectReturn,
+  getRedirectReturn,
+  completeRedirectReturn,
+} from "../shared/auth/redirectReturn.js";
 
 // jsdom here doesn't expose sessionStorage on an opaque origin — install a minimal one.
 beforeAll(() => {
@@ -47,6 +53,14 @@ describe("rememberRedirectReturn", () => {
     rememberRedirectReturn();
     expect(sessionStorage.getItem("skye:auth:returnHref")).toContain("applicationId=app-1");
     expect(sessionStorage.getItem("skye:auth:returnHref")).toContain("tenantId=t-1");
+  });
+
+  it("getRedirectReturn reads it back; forgetRedirectReturn clears it", () => {
+    history.replaceState({}, "", "/form?siteId=s1&applicationId=app-1#my-form/new");
+    rememberRedirectReturn();
+    expect(getRedirectReturn()).toContain("#my-form/new");
+    forgetRedirectReturn();
+    expect(getRedirectReturn()).toBeNull();
   });
 });
 

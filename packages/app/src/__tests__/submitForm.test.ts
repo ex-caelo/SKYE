@@ -171,7 +171,9 @@ describe("submitForm", () => {
     });
 
     expect(result.success).toBe(true); // the submission still goes through
-    expect(result.fileUploadErrors?.report).toMatch(/isn't implemented/);
+    // The user-facing message is now a plain sentence (the raw error goes to the console); it
+    // names the field label, or the key when there's no label.
+    expect(result.fileUploadErrors?.report).toMatch(/couldn't be uploaded/);
     expect(result.item?.fields).not.toHaveProperty("ReportUrl"); // the failed field was left unset, not sent as a raw File
   });
 

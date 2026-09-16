@@ -1,0 +1,315 @@
+{
+  "id": "luddy-llc-event-proposal",
+  "title": "Luddy LLC Event Proposal",
+  "description": "Propose an event for the Luddy Living Learning Community. Fill in every page, then submit for review.",
+  "mode": "both",
+  "list": {
+    "id": "62e36118-9efa-43b8-a539-18f0d73fff34",
+    "siteId": "b5a3efce-2a68-4fa3-9bbb-ba300ede5f73"
+  },
+  "layout": {
+    "gridTemplateColumns": 2,
+    "gap": "1.5rem"
+  },
+  "pages": {
+    "basics": {
+      "title": "Basics",
+      "order": 1,
+      "layout": {
+        "gridTemplateColumns": 2,
+        "gap": "1.5rem",
+        "gridTemplateAreas": [
+          "poster eventTitle",
+          "poster eventDescription",
+          "poster eventDescription",
+          "startTime endTime",
+          "location location",
+          "resourcesNote resourcesNote"
+        ]
+      }
+    },
+    "metrics": {
+      "title": "Metrics",
+      "order": 2,
+      "layout": {
+        "gridTemplateColumns": 2,
+        "gap": "1.5rem",
+        "gridTemplateAreas": [
+          "eventType host",
+          "cohosts photographers",
+          "attire categories",
+          "studentSuccessDomain naceCompetencies",
+          "studentImpact studentImpact"
+        ]
+      }
+    },
+    "purchases": {
+      "title": "Purchases",
+      "order": 3,
+      "layout": {
+        "gridTemplateColumns": 1,
+        "gap": "1.5rem",
+        "gridTemplateAreas": [
+          "requiresPurchases",
+          "purchaseTable"
+        ]
+      }
+    }
+  },
+  "fields": {
+    "poster": {
+      "page": "basics",
+      "order": 1,
+      "source": "virtual",
+      "controlType": "file",
+      "label": "Poster",
+      "helpText": "Upload the event poster image. It is saved to Documents / PHOTOS! / Event Posters / 2026-2027 and named after the event.",
+      "attributes": { "accept": "image/*" },
+      "fileStorage": {
+        "target": "library",
+        "fileNameTemplate": "{{date:startTime}} {{fields.eventTitle}} Poster",
+        "library": {
+          "driveId": "b!zu-jtWgqo0-bu7owDt5fc7hFb7GyOOBGk33wD3uiCrAn1ihq4oPKQaTBjm2d_8D2",
+          "folderPath": "PHOTOS!/Event Posters/2026-2027"
+        }
+      }
+    },
+    "eventTitle": {
+      "page": "basics",
+      "order": 2,
+      "source": "sharepoint",
+      "bindTo": "Title",
+      "controlType": "text",
+      "label": "Título",
+      "required": true,
+      "maxlength": 255
+    },
+    "eventDescription": {
+      "page": "basics",
+      "order": 3,
+      "source": "sharepoint",
+      "bindTo": "EventDescription",
+      "controlType": "textarea",
+      "label": "Event Description",
+      "required": true,
+      "attributes": { "rows": 6 }
+    },
+    "startTime": {
+      "page": "basics",
+      "order": 4,
+      "source": "sharepoint",
+      "bindTo": "StartTime",
+      "controlType": "datetime-local",
+      "label": "Start Time",
+      "required": true
+    },
+    "endTime": {
+      "page": "basics",
+      "order": 5,
+      "source": "sharepoint",
+      "bindTo": "EndTime",
+      "controlType": "datetime-local",
+      "label": "End Time",
+      "required": true
+    },
+    "location": {
+      "page": "basics",
+      "order": 6,
+      "source": "sharepoint",
+      "bindTo": "Location",
+      "controlType": "checkboxGroup",
+      "label": "Location",
+      "required": true,
+      "helpText": "Choose one or more rooms or areas in the LLC."
+    },
+    "resourcesNote": {
+      "page": "basics",
+      "order": 7,
+      "source": "virtual",
+      "controlType": "paragraph",
+      "label": "Scheduling resources: Event Calendar · Not-Yet-Approved Events · Luddy Class Schedule.   Location resource: LLC Floorplan."
+    },
+    "eventType": {
+      "page": "metrics",
+      "order": 1,
+      "source": "sharepoint",
+      "bindTo": "HostRole",
+      "controlType": "select",
+      "label": "Event Type",
+      "required": true,
+      "options": [
+        { "value": "Peer Mentor or Staff", "label": "Peer Mentor or Staff" },
+        { "value": "EBOARD", "label": "EBOARD" },
+        { "value": "Townhall", "label": "Townhall" }
+      ]
+    },
+    "host": {
+      "page": "metrics",
+      "order": 2,
+      "source": "sharepoint",
+      "bindTo": "Host",
+      "controlType": "peoplePicker",
+      "label": "Host",
+      "required": true
+    },
+    "cohosts": {
+      "page": "metrics",
+      "order": 3,
+      "source": "sharepoint",
+      "bindTo": "Cohosts",
+      "controlType": "peoplePicker",
+      "label": "Cohosts"
+    },
+    "photographers": {
+      "page": "metrics",
+      "order": 4,
+      "source": "sharepoint",
+      "bindTo": "Photographer_x0028_s_x0029_",
+      "controlType": "peoplePicker",
+      "label": "Photographer(s)"
+    },
+    "attire": {
+      "page": "metrics",
+      "order": 5,
+      "source": "sharepoint",
+      "bindTo": "Attire",
+      "controlType": "select",
+      "label": "Attire",
+      "required": true,
+      "options": [
+        { "value": "Casual", "label": "Casual" },
+        { "value": "Smart", "label": "Smart" },
+        { "value": "Business", "label": "Business" },
+        { "value": "Formal", "label": "Formal" },
+        { "value": "Machinery, Work-Safe", "label": "Machinery, Work-Safe" },
+        { "value": "See Description", "label": "See Description" }
+      ]
+    },
+    "categories": {
+      "page": "metrics",
+      "order": 6,
+      "source": "sharepoint",
+      "bindTo": "Categories",
+      "controlType": "checkboxGroup",
+      "label": "Categories"
+    },
+    "studentSuccessDomain": {
+      "page": "metrics",
+      "order": 7,
+      "source": "sharepoint",
+      "bindTo": "StudentSuccessDomain",
+      "controlType": "checkboxGroup",
+      "label": "Student Success Domain"
+    },
+    "naceCompetencies": {
+      "page": "metrics",
+      "order": 8,
+      "source": "sharepoint",
+      "bindTo": "NACECompetencies",
+      "controlType": "checkboxGroup",
+      "label": "NACE Competencies"
+    },
+    "studentImpact": {
+      "page": "metrics",
+      "order": 9,
+      "source": "sharepoint",
+      "bindTo": "StudentImpact_x002c_EventGoalsan",
+      "controlType": "textarea",
+      "label": "Student Impact, Event Goals and Purpose",
+      "required": true,
+      "helpText": "Please explain how your event will help build community and/or develop leadership skills within the Luddy LLC.",
+      "attributes": { "rows": 6 }
+    },
+    "requiresPurchases": {
+      "page": "purchases",
+      "order": 1,
+      "source": "sharepoint",
+      "bindTo": "RequiresPurchases",
+      "controlType": "radio",
+      "label": "Requires Purchases",
+      "required": true,
+      "options": [
+        { "value": "Yes", "label": "Yes" },
+        { "value": "No", "label": "No" }
+      ]
+    },
+    "purchaseTable": {
+      "page": "purchases",
+      "order": 2,
+      "source": "virtual",
+      "controlType": "lookupTable",
+      "label": "Purchase Table",
+      "visibleIf": { "field": "requiresPurchases", "operator": "equals", "value": "Yes" },
+      "table": {
+        "relatedList": { "id": "3ad9fead-6ec6-473b-93d3-b0aeeaef427c" },
+        "linkMode": "parentReference",
+        "parentReferenceColumn": "k62e361189_d041078067_rlu",
+        "allowAdd": true,
+        "allowEdit": true,
+        "allowDelete": true,
+        "columns": {
+          "itemTitle": {
+            "source": "sharepoint",
+            "bindTo": "Title",
+            "controlType": "text",
+            "label": "Title",
+            "required": true,
+            "order": 1
+          },
+          "store": {
+            "source": "sharepoint",
+            "bindTo": "Store",
+            "controlType": "select",
+            "label": "Store",
+            "required": true,
+            "order": 2,
+            "options": [
+              { "value": "In-Person: Kroger", "label": "In-Person: Kroger" },
+              { "value": "In-Person: Target", "label": "In-Person: Target" },
+              { "value": "In-Person: Other", "label": "In-Person: Other" },
+              { "value": "Online: Amazon", "label": "Online: Amazon" },
+              { "value": "Online: Other", "label": "Online: Other" },
+              { "value": "Catering/Delivery", "label": "Catering/Delivery" },
+              { "value": "Software/Digital", "label": "Software/Digital" }
+            ]
+          },
+          "linkToItem": {
+            "source": "sharepoint",
+            "bindTo": "LinktoItem",
+            "controlType": "url",
+            "label": "Link to Item",
+            "required": true,
+            "order": 3
+          },
+          "pricePerUnit": {
+            "source": "sharepoint",
+            "bindTo": "PriceperUnit",
+            "controlType": "currency",
+            "label": "Price per Unit",
+            "required": true,
+            "min": 0,
+            "order": 4
+          },
+          "quantity": {
+            "source": "sharepoint",
+            "bindTo": "Quantity",
+            "controlType": "number",
+            "label": "Quantity",
+            "required": true,
+            "min": 1,
+            "order": 5
+          }
+        }
+      }
+    }
+  },
+  "postActions": {
+    "proposalSubmitted": {
+      "trigger": "onSuccess",
+      "type": "showMessage",
+      "label": "Confirm submission",
+      "message": "Your event proposal has been submitted. You'll hear back once it has been reviewed.",
+      "level": "success"
+    }
+  }
+}

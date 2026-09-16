@@ -1,44 +1,110 @@
 /* Minimal baseline — a design pass is a separate follow-up (see TODO §7). */
 
 * {
-  box-sizing: border-box;
+	box-sizing: border-box;
 }
 
-body { 
-  font-family: system-ui, sans-serif; 
-  margin: 2rem; 
-  color: #1a1a1a;
-  background-image: url('/assets/skye.webp');
-  background-size: cover;
-  height: 100svh;
+body {
+	font-family: system-ui, sans-serif;
+	margin: 2rem;
+	color: var(--text-primary);
+	background-image: url("/assets/skye.webp");
+	background-size: cover;
+	min-height: 100svh;
 }
 
 #skye-app {
-  background: white;
-  padding: 20px 30px;
-  border-radius: 8px;
-  max-height: calc(110svh - 4rem);
-  overflow: scroll;
+	background: var(--background);
+	padding: 20px 30px;
+	border-radius: 8px;
 }
-
-
-
 
 /* Pages ship every state in the markup and toggle it with `hidden` (see lib/ui/pageState.ts) —
    make sure nothing overrides that back to visible. */
-[hidden] { display: none !important; }
+[hidden] {
+	display: none !important;
+}
 
-.skye-form__tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 1px solid #ddd; }
-.skye-form__tabs button { padding: 0.5rem 1rem; border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; }
-.skye-form__tab--active { border-bottom-color: #2563eb; font-weight: 600; }
+.skye-form {
+	container-type: inline-size;
+}
 
-.skye-form__page { padding-bottom: 1rem; }
+.skye-form__tabs {
+	display: flex;
+	gap: 0.5rem;
+	margin-bottom: 1.5rem;
+	border-bottom: var(--border-size) solid #ddd;
+}
+.skye-form__tabs button {
+	padding: 10px 15px;
+	justify-content: center;
+	align-items: center;
+	border-radius: var(--border-radius);
+	background: #eaeaea;
+	color: var(--text-primary);
+}
+.skye-form__tab--active {
+	background: var(--primary-medium) !important;
+	color: var(--text-invert) !important;
+	font-weight: 600;
+}
+/* A page with a currently-shown validation error — surfaced on the tab so a problem on a page
+   you're not looking at is still visible (renderForm marks this on validation + page switch). */
+.skye-form__tabs button.skye-form__tab--error {
+	color: var(--danger) !important;
+	background: var(--danger-light) !important;
+	border: var(--danger) dotted 2px;
+}
+.skye-form__tabs button.skye-form__tab--error::after {
+	content: " ⚠︎";
+	color: var(--danger);
+}
 
-.skye-field { display: flex; flex-direction: column; gap: 0.25rem; }
-.skye-field > label, .skye-field legend { font-weight: 600; font-size: 0.9rem; }
-.skye-field fieldset { border: 1px solid #ddd; padding: 0.5rem 0.75rem; }
-.skye-field__subtitle, .skye-field__help { font-size: 0.8rem; color: #666; }
-.skye-field__message { font-size: 0.8rem; color: #b91c1c; min-height: 1em; }
+.skye-form__page {
+	padding-bottom: 1rem;
+}
+
+.skye-field {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+.skye-field > label,
+.skye-field legend {
+	font-weight: 600;
+	font-size: 0.9rem;
+}
+.skye-field fieldset {
+	display: flex;
+	flex-direction: column;
+	border: var(--border-size) solid #ddd;
+	padding: 0.5rem 0.75rem;
+	border: none;
+	padding: 0;
+
+	legend {
+		margin-bottom: 8px;
+	}
+
+	input[type="radio"], input[type="checkbox"] {
+		margin-right: 4px;
+	}
+	
+	label:not(:last-child) {
+		margin-bottom: 8px;
+	}
+}
+
+.skye-field__subtitle,
+.skye-field__help {
+	font-size: 0.8rem;
+	color: #666;
+}
+.skye-field__message {
+	font-size: 0.8rem;
+	color: var(--danger);
+	min-height: 1em;
+}
 
 /* Field-level validation — only ever visible once a field has been touched (blurred) or a submit
    was attempted (see renderForm.ts's validateAll/touchedFields), the same "don't flash red on a
@@ -53,12 +119,18 @@ body {
    actual set from fieldRegistry.ts — skye-calculated-display is deliberately excluded, since it's
    a read-only derived display that's never itself validated (see validateFormValues.ts's own
    skip list). */
-.skye-field--invalid input, .skye-field--invalid select, .skye-field--invalid textarea,
-input:user-invalid, select:user-invalid, textarea:user-invalid {
-  border-color: #b91c1c;
-  outline-color: #b91c1c;
+.skye-field--invalid input,
+.skye-field--invalid select,
+.skye-field--invalid textarea,
+input:user-invalid,
+select:user-invalid,
+textarea:user-invalid {
+	border-color: var(--danger);
+	outline-color: var(--danger);
 }
-.skye-field--invalid label { color: #b91c1c; }
+.skye-field--invalid label {
+	color: var(--danger);
+}
 
 /* skye-richtext and skye-lookup-table have no single native input/select/textarea the rule above
    already reaches (richtext's editor is a contenteditable div; a lookup table has one input per
@@ -66,79 +138,579 @@ input:user-invalid, select:user-invalid, textarea:user-invalid {
    since border-color alone (matching the rule above) wouldn't render without an actual
    border/outline already set on it. skye-people-picker/skye-lookup-picker don't need an entry
    here — their inner search <input> is already reached by the rule above. */
-.skye-field--invalid > skye-richtext, .skye-field--invalid > skye-lookup-table,
-skye-richtext:user-invalid, skye-lookup-table:user-invalid {
-  border: 1px solid #b91c1c;
+.skye-field--invalid > skye-richtext,
+.skye-field--invalid > skye-lookup-table,
+skye-richtext:user-invalid,
+skye-lookup-table:user-invalid {
+	border: var(--border-size) solid var(--danger);
 }
 
 /* checkbox appearance: "switch" (cosmetic only — see schema's `appearance` property) */
-input[type="checkbox"].skye-switch { width: 2.5rem; height: 1.4rem; appearance: none; background: #ccc; border-radius: 999px; position: relative; cursor: pointer; }
-input[type="checkbox"].skye-switch:checked { background: #2563eb; }
-input[type="checkbox"].skye-switch::before {
-  content: ""; position: absolute; top: 2px; left: 2px; width: 1.1rem; height: 1.1rem;
-  background: white; border-radius: 50%; transition: transform 0.15s;
+input[type="checkbox"].skye-switch {
+	width: 2.5rem;
+	height: 1.4rem;
+	appearance: none;
+	background-color: var(--background-secondary);
+	border-radius: 999px;
+	position: relative;
+	cursor: pointer;
 }
-input[type="checkbox"].skye-switch:checked::before { transform: translateX(1.1rem); }
+input[type="checkbox"].skye-switch:checked {
+	background: var(--primary-medium);
+}
+input[type="checkbox"].skye-switch::before {
+	content: "";
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 1.1rem;
+	height: 1.1rem;
+	background: white;
+	border-radius: 50%;
+	transition: transform 0.15s;
+}
+input[type="checkbox"].skye-switch:checked::before {
+	transform: translateX(1.1rem);
+}
 
 /* --- new components: minimal, functional styling only --- */
 
 /* status regions are <output> (implicit role=status) — make them block-level like the old <div>s */
-.skye-form__status, .skye-add-site__status, .skye-create-assets__status { display: block; }
-.skye-form__status[data-level="error"] { color: #b91c1c; }
-.skye-form__status[data-level="warning"] { color: #b45309; }
-.skye-form__status[data-level="success"] { color: #15803d; }
-.skye-form__submit { margin-top: 1rem; padding: 0.5rem 1.25rem; }
-
-.skye-search-picker { position: relative; display: inline-block; width: 100%; }
-.skye-search-picker input { width: 100%; box-sizing: border-box; }
-.skye-search-picker__dropdown {
-  position: absolute; z-index: 10; left: 0; right: 0; margin: 0; padding: 0;
-  list-style: none; background: white; border: 1px solid #ccc; max-height: 12rem; overflow-y: auto;
+.skye-form__status,
+.skye-add-site__status,
+.skye-create-assets__status {
+	display: block;
 }
-.skye-search-picker__dropdown li { padding: 0.4rem 0.6rem; cursor: pointer; }
-.skye-search-picker__dropdown li:hover { background: #f0f4ff; }
+.skye-form__status[data-level="error"] {
+	color: var(--danger);
+}
+.skye-form__status[data-level="warning"] {
+	color: #b45309;
+}
+.skye-form__status[data-level="success"] {
+	color: #15803d;
+}
+.skye-form__submit {
+	margin-top: 1rem;
+	padding: 0.5rem 1.25rem;
+}
 
-.skye-lookup-table table { border-collapse: collapse; width: 100%; margin-bottom: 0.5rem; }
-.skye-lookup-table th, .skye-lookup-table td { border: 1px solid #ddd; padding: 0.3rem; }
+.skye-search-picker {
+	position: relative;
+	display: inline-block;
+	width: 100%;
+}
+.skye-search-picker input {
+	width: 100%;
+	box-sizing: border-box;
+}
+.skye-search-picker__dropdown {
+	position: absolute;
+	z-index: 10;
+	left: 0;
+	right: 0;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	background-color: var(--background-lightest);
+	border: var(--border-size) solid var(--border);
+	max-height: 12rem;
+	overflow-y: auto;
+}
+.skye-search-picker__dropdown li {
+	padding: 0.4rem 0.6rem;
+	cursor: pointer;
+}
+.skye-search-picker__dropdown li:hover {
+	background-color: var(--background-light);
+}
 
-.skye-richtext__toolbar-placeholder { display: flex; gap: 0.4rem; padding: 0.35rem; background: #f3f4f6; border: 1px solid #ccc; border-bottom: none; }
-.skye-richtext__toolbar-placeholder span { display: inline-block; width: 1.5rem; height: 1.2rem; background: #d1d5db; border-radius: 3px; }
-.skye-richtext__editor { border: 1px solid #ccc; min-height: 4rem; padding: 0.4rem; }
+/* --- file field ("Poster"): a tall drop zone that fills its (possibly row-spanning) grid cell --- */
+.skye-field--file {
+	height: 100%;
+}
+.skye-field--file input[type="file"] {
+	flex: 1 1 auto;
+	min-height: 12rem;
+	width: 100%;
+	padding: 1.25rem;
+	border: 2px dashed var(--border);
+	border-radius: 10px;
+	background: var(--background-secondary);
+	cursor: pointer;
+}
+.skye-field--file input[type="file"]:hover {
+	background-color: var(--primary-light);
+}
 
-.skye-form__draft-banner { background: #fef9c3; border: 1px solid #eab308; padding: 0.5rem 0.75rem; margin-bottom: 1rem; font-size: 0.9rem; }
-.skye-form__edit-link { display: inline-block; margin-bottom: 1rem; font-size: 0.85rem; }
+/* --- token / chip picker: people picked as discrete removable units (no delimiters for the user) --- */
+.skye-token-picker {
+	position: relative;
+	display: block;
+	width: 100%;
+}
+.skye-token-picker__box {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
+	align-items: center;
+	padding: 0.125rem;
+	border: var(--border-size) solid var(--border);
+	border-radius: var(--border-radius);
+	background-color: var(--background-lightest);
+}
+.skye-token-picker__box input {
+	outline: none;
+	box-shadow: none;
+}
 
-.skye-site-switcher ul { list-style: none; padding: 0; }
-.skye-site-switcher li { margin-bottom: 0.5rem; }
-.skye-site-switcher button { padding: 0.5rem 1rem; width: 100%; text-align: left; }
-.skye-picker-kind { color: #666; font-size: 0.8rem; margin-left: 0.4rem; }
-.skye-picker-create { margin-top: 1rem; padding: 0.5rem 1rem; }
+.skye-token-picker__box input {
+	background-color: var(--background-lightest);
+}
+
+.skye-token-picker__box:focus-within {
+	outline: 2px solid var(--primary-medium);
+	outline-offset: var(--border-size);
+}
+.skye-token {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	padding: 0 0.15rem 0 0.55rem;
+	background: var(--primary-lightest);
+	border: var(--border-size) solid var(--primary-medium);
+	border-radius: 999px;
+	font-size: 0.85rem;
+	line-height: 1.4;
+}
+.skye-token__remove {
+	border: none;
+	background: var(--primary-light);
+	color: var(--primary-medium);
+	cursor: pointer;
+	width: 1.1rem;
+	height: 1.1rem;
+	border-radius: 50%;
+	font-size: 0.9rem;
+	line-height: 1;
+	display: inline-grid;
+	place-items: center;
+	padding: 0;
+	margin: 2px;
+	padding-bottom: 2px;
+}
+.skye-token__remove:hover {
+	background: var(--primary-medium);
+	color: white;
+}
+.skye-token-picker__input {
+	flex: 1 1 6rem;
+	min-width: 6rem;
+	border: none;
+	outline: none;
+	padding: 0.25rem;
+	font: inherit;
+	background: transparent;
+	margin: 0;
+}
+.skye-token-picker__dropdown {
+	position: absolute;
+	z-index: 10;
+	left: 0;
+	right: 0;
+	margin: 0.15rem 0 0;
+	padding: 0;
+	list-style: none;
+	background-color: var(--background-lightest);
+	border: var(--border-size) solid var(--border);
+	border-radius: var(--border-radius);
+	max-height: 12rem;
+	overflow-y: auto;
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+.skye-token-picker__dropdown li {
+	padding: 0.45rem 0.6rem;
+	cursor: pointer;
+}
+.skye-token-picker__dropdown li:hover,
+.skye-token-picker__dropdown li[aria-selected="true"] {
+	background-color: var(--primary-lightest);
+}
+
+/* --- multi-select dropdown: replaces a vertical checkbox list; opens a checkable option list --- */
+.skye-multi-select {
+	position: relative;
+	display: block;
+	width: 100%;
+}
+.skye-multi-select__trigger {
+	width: 100%;
+	text-align: left;
+	padding: 0.35rem;
+	border: var(--border-size) solid var(--border);
+	border-radius: var(--border-radius);
+	background-color: var(--background-lightest);
+	cursor: pointer;
+	font: inherit;
+	display: flex;
+	justify-content: space-between;
+	gap: 0.5rem;
+	align-items: center;
+	color: var(--text-primary);
+}
+.skye-multi-select__trigger:hover,
+.skye-multi-select__trigger:focus-visible,
+.skye-multi-select__trigger[aria-expanded="true"] {
+	background-color: var(--background-lightest);
+	color: var(--text-primary);
+}
+
+.skye-multi-select__trigger:focus-visible {
+	outline: 2px solid #ccc;
+}
+.skye-multi-select__trigger[aria-expanded="true"] {
+	border-color: var(--border);
+}
+.skye-multi-select__caret {
+	color: #888;
+}
+.skye-multi-select__placeholder {
+	color: #767680;
+}
+.skye-multi-select__panel {
+	position: absolute;
+	z-index: 1000;
+	left: 0;
+	right: 0;
+	margin: 0.15rem 0 0;
+	padding: 0.25rem;
+	list-style: none;
+	background-color: var(--background-lightest);
+	border: var(--border-size) solid var(--border);
+	border-radius: var(--border-radius);
+	max-height: 14rem;
+	overflow-y: auto;
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+.skye-multi-select__option {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.4rem 0.5rem;
+	cursor: pointer;
+	border-radius: 4px;
+}
+.skye-multi-select__option:hover {
+	background-color: var(--background-light);
+}
+.skye-multi-select__option input {
+	margin: 0;
+}
+
+.skye-lookup-table {
+	overflow: scroll;
+	max-width: 100cqw;
+}
+
+.skye-lookup-table table {
+	border-collapse: collapse;
+	overflow: scroll;
+	margin-bottom: 0.5rem;
+	border-radius: var(--border-radius);
+	border-collapse: separate;
+	border-spacing: 0;
+
+	td {
+		border-style: solid none none solid;
+	}
+
+	td:last-child {
+		border-style: solid solid none solid;
+	}
+
+	tr:last-child td {
+		border-bottom-style: solid;
+	}
+
+	th {
+		border-style: solid none solid solid;
+	}
+
+	th:last-child {
+		border-right-style: solid;
+		border-top-right-radius: var(--border-radius);
+	}
+
+	th:first-child {
+		border-top-left-radius: var(--border-radius);
+	}
+
+	tr:last-child td:first-child {
+		border-bottom-left-radius: var(--border-radius);
+	}
+
+	tr:last-child td:last-child {
+		border-bottom-right-radius: var(--border-radius);
+	}
+}
+.skye-lookup-table th,
+.skye-lookup-table td {
+	border: var(--border-size) solid var(--border);
+}
+
+.skye-lookup-table td {
+	padding: 0;
+	max-height: fit-content;
+}
+
+.skye-lookup-table td,
+.skye-lookup-table th {
+	border-style: none solid solid none;
+}
+
+.skye-lookup-table td > input,
+.skye-lookup-table td > select,
+.skye-lookup-table td > [class^=".skye-"] {
+	border-radius: 0;
+	margin: 0;
+	width: 100%;
+	height: 100%;
+	border: none;
+	background: transparent;
+}
+
+.skye-lookup-table td:last-child > button {
+	margin: 0;
+	background: transparent;
+	color: var(--primary-medium);
+	border: none;
+	border-radius: 0;
+}
+
+.skye-richtext__toolbar-placeholder {
+	display: flex;
+	gap: 0.4rem;
+	padding: 0.35rem;
+	background: #f3f4f6;
+	border: var(--border-size) solid var(--border);
+	border-bottom: none;
+}
+.skye-richtext__toolbar-placeholder span {
+	display: inline-block;
+	width: 1.5rem;
+	height: 1.2rem;
+	background: #d1d5db;
+	border-radius: 3px;
+}
+.skye-richtext__editor {
+	border: var(--border-size) solid var(--border);
+	min-height: 4rem;
+	padding: 0.4rem;
+}
+
+.skye-form__draft-banner {
+	background: #fef9c3;
+	border: var(--border-size) solid #eab308;
+	padding: 0.5rem 0.75rem;
+	margin-bottom: 1rem;
+	font-size: 0.9rem;
+}
+.skye-form__edit-link {
+	display: inline-block;
+	margin-bottom: 1rem;
+	font-size: 0.85rem;
+}
+
+.skye-site-switcher ul {
+	list-style: none;
+	padding: 0;
+}
+.skye-site-switcher li {
+	margin-bottom: 0.5rem;
+}
+.skye-site-switcher button {
+	padding: 0.5rem 1rem;
+	width: 100%;
+	text-align: left;
+}
+.skye-picker-kind {
+	color: #666;
+	font-size: 0.8rem;
+	margin-left: 0.4rem;
+}
+.skye-picker-create {
+	margin-top: 1rem;
+	padding: 0.5rem 1rem;
+}
 
 /* "Set up SKYE on another site" panel */
-.skye-add-site { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #ddd; }
-.skye-add-site h3 { font-size: 1rem; margin-bottom: 0.25rem; }
-.skye-add-site p { font-size: 0.85rem; color: #666; margin: 0 0 0.5rem; }
-.skye-add-site__form { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.skye-add-site__input { flex: 1 1 20rem; padding: 0.45rem 0.6rem; }
-.skye-add-site__button { padding: 0.45rem 1rem; }
-.skye-add-site__status { font-size: 0.85rem; min-height: 1.2em; margin-top: 0.5rem; }
-.skye-add-site__status[data-level="error"] { color: #b91c1c; }
-.skye-add-site__status[data-level="success"] { color: #15803d; }
+.skye-add-site {
+	margin-top: 2rem;
+	padding-top: 1rem;
+	border-top: var(--border-size) solid #ddd;
+}
+.skye-add-site h3 {
+	font-size: 1rem;
+	margin-bottom: 0.25rem;
+}
+.skye-add-site p {
+	font-size: 0.85rem;
+	color: #666;
+	margin: 0 0 0.5rem;
+}
+.skye-add-site__form {
+	display: flex;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+}
+.skye-add-site__input {
+	flex: 1 1 20rem;
+	padding: 0.45rem 0.6rem;
+}
+.skye-add-site__button {
+	padding: 0.45rem 1rem;
+}
+.skye-add-site__status {
+	font-size: 0.85rem;
+	min-height: 1.2em;
+	margin-top: 0.5rem;
+}
+.skye-add-site__status[data-level="error"] {
+	color: var(--danger);
+}
+.skye-add-site__status[data-level="success"] {
+	color: #15803d;
+}
 
 /* "Manage permissions" step, shown after a new site is set up */
-.skye-permissions-step p, .skye-create-assets p { max-width: 42rem; }
-.skye-permissions-step__link { display: inline-block; margin: 0.5rem 0 1rem; font-weight: 600; }
-.skye-permissions-step__done { display: block; padding: 0.5rem 1.25rem; }
+.skye-permissions-step p,
+.skye-create-assets p {
+	max-width: 42rem;
+}
+.skye-permissions-step__link {
+	display: inline-block;
+	margin: 0.5rem 0 1rem;
+	font-weight: 600;
+}
+.skye-permissions-step__done {
+	display: block;
+	padding: 0.5rem 1.25rem;
+}
 
 /* "Create Site Assets first" step */
-.skye-create-assets__link { display: inline-block; margin: 0.5rem 0 1rem; font-weight: 600; }
-.skye-create-assets__row { display: flex; gap: 0.5rem; list-style: none; margin: 0; padding: 0; }
-.skye-create-assets__row button { padding: 0.45rem 1rem; }
-.skye-create-assets__status { font-size: 0.85rem; min-height: 1.2em; margin-top: 0.5rem; }
-.skye-create-assets__status[data-level="error"] { color: #b91c1c; }
+.skye-create-assets__link {
+	display: inline-block;
+	margin: 0.5rem 0 1rem;
+	font-weight: 600;
+}
+.skye-create-assets__row {
+	display: flex;
+	gap: 0.5rem;
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+.skye-create-assets__row button {
+	padding: 0.45rem 1rem;
+}
+.skye-create-assets__status {
+	font-size: 0.85rem;
+	min-height: 1.2em;
+	margin-top: 0.5rem;
+}
+.skye-create-assets__status[data-level="error"] {
+	color: var(--danger);
+}
 
 /* diag.astro's results table — reuses the same data-level color convention as .skye-form__status */
-table { border-collapse: collapse; width: 100%; margin-top: 1.5rem; font-size: 0.9rem; }
-th, td { border: 1px solid #ddd; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
-td[data-level="success"] { color: #15803d; }
-td[data-level="error"] { color: #b91c1c; }
+table {
+	border-collapse: collapse;
+	width: 100%;
+	margin-top: 1.5rem;
+	font-size: 0.9rem;
+}
+th,
+td {
+	border: var(--border-size) solid #ddd;
+	padding: 0.4rem 0.6rem;
+	text-align: left;
+	vertical-align: top;
+}
+td[data-level="success"] {
+	color: #15803d;
+}
+td[data-level="error"] {
+	color: var(--danger);
+}
+
+/* --------------------------------------------------------------------------
+   Responsive / small-screen (phones, narrow SharePoint side panels).
+   A page's grid — its column count and gridTemplateAreas — is applied as an
+   INLINE style by layoutEngine.ts / renderForm's showPage(). The inactive
+   tab pages are hidden with an inline `display:none` (NOT the [hidden]
+   attribute), and the active one carries inline `display:grid`. So this
+   block must NOT touch `display` at all — overriding it would re-show every
+   tab. It only collapses the grid TRACKS: one column, no named-area map,
+   and each field's inline `grid-area:<fieldKey>` cleared (an unresolved
+   area name would otherwise pin every field onto one cell). Result: on the
+   visible page the fields stack top-to-bottom by `order`; the hidden pages
+   stay hidden.
+   -------------------------------------------------------------------------- */
+@media (max-width: 700px) {
+	body {
+		margin: 0;
+		background: white;
+		height: auto;
+	}
+	#skye-app {
+		padding: 1rem;
+		border-radius: 0;
+		max-height: none;
+		overflow: visible;
+	}
+
+	.skye-form__tabs {
+		flex-wrap: wrap;
+		gap: 0.25rem;
+	}
+	.skye-form__tabs button {
+		padding: 0.5rem 0.75rem;
+	}
+
+	.skye-form__page {
+		grid-template-columns: 1fr !important;
+		grid-template-areas: none !important;
+		grid-template-rows: auto !important;
+		gap: 1rem !important;
+	}
+	.skye-form__page > .skye-field,
+	.skye-form__page > .skye-field--content {
+		grid-area: auto !important;
+		grid-column: auto !important;
+		grid-row: auto !important;
+	}
+
+	/* A row-spanning file drop zone shouldn't stay tall once it's the full width. */
+	.skye-field--file input[type="file"] {
+		min-height: 8rem;
+	}
+
+	/* The lookupTable is genuinely wide (5+ columns) — let it scroll within its
+     own field instead of stretching the page past the viewport. */
+	.skye-lookup-table {
+		overflow-x: auto;
+	}
+	.skye-lookup-table table {
+		min-width: 34rem;
+	}
+}
+
+/* Never let any field control force the page wider than the screen. */
+.skye-field input,
+.skye-field select,
+.skye-field textarea,
+.skye-field skye-people-picker,
+.skye-field skye-multi-select,
+.skye-field skye-lookup-picker {
+	max-width: 100%;
+}

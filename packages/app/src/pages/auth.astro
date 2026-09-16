@@ -1,0 +1,32 @@
+---
+// The dedicated MSAL redirect landing page — the `redirectUri` for every
+// SKYE MSAL instance (see shared/auth/redirectUri.ts). Its ONLY job is to
+// finish the Microsoft sign-in handshake:
+//
+//  - loginPopup: the popup lands here; the opener reads the response and
+//    closes it. Because this page renders no SKYE app, the popup never
+//    shows a "mini SKYE" and loginPopup resolves in ~tens of ms instead of
+//    timing out after 60s.
+//  - loginRedirect: the whole tab lands here; page-scripts/auth.ts
+//    completes the token exchange and navigates back to the page the user
+//    started on.
+//
+// Deliberately does NOT use BaseLayout — no stylesheet links, no
+// components, nothing to slow the first paint.
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Signing you in… — SKYE</title>
+    <style>
+      body { font: 15px system-ui, sans-serif; margin: 3rem; color: #444; }
+    </style>
+  </head>
+  <body>
+    <p role="status">Signing you in…</p>
+    <script src="../page-scripts/auth.ts"></script>
+  </body>
+</html>

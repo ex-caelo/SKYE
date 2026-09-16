@@ -9,7 +9,8 @@ import {
   resolveTenantInteractively,
   TENANT_GUID_RE,
 } from "./tenantResolver.js";
-import { rememberRedirectReturn } from "./redirectReturn.js";
+import { rememberRedirectReturn, forgetRedirectReturn } from "./redirectReturn.js";
+import { authRedirectUri } from "./redirectUri.js";
 
 /**
  * Whether to try the `/common` authority when no tenant id is known,
@@ -70,7 +71,8 @@ function getMsalInstance(applicationId: string, tenantId: string | undefined): P
       auth: {
         clientId: applicationId,
         authority: `https://login.microsoftonline.com/${tenantId ?? "common"}`,
-        redirectUri: window.location.origin,
+        // A dedicated minimal landing page, not the bare app origin — see redirectUri.ts.
+        redirectUri: authRedirectUri(),
       },
       cache: { cacheLocation: "sessionStorage" },
     });
@@ -131,18 +133,30 @@ async function acquireWithTenant(applicationId: string, tenantId: string | undef
     return silent.accessToken;
   }
 
+  // Stash the full pre-sign-in URL (query string + hash) BEFORE any interactive step, not just
+  // before the redirect fallback below. If the popup handshake degrades into a full-page redirect
+  // — which AAD can also trigger on its own (an interrupt page, a conditional-access bounce) — the
+  // landing on the fixed `/auth` redirect URI has no other way to know where the user started, and
+  // would otherwise dump them on the bare origin with the siteId/applicationId/formId all lost.
+  rememberRedirectReturn();
+
   try {
     const result = await msal.loginPopup({ scopes });
+    forgetRedirectReturn(); // popup succeeded — the main window kept its URL, nothing to return to
     rememberTenantFromResult(applicationId, result);
     return result.accessToken;
   } catch (popupErr) {
     // No real tenant to fall back on -> a /common redirect would just dead-end. Let acquireToken recover.
-    if (!tenantId) throw popupErr;
-    if (isCommonEndpointUnsupported(popupErr)) throw popupErr;
+    if (!tenantId) {
+      forgetRedirectReturn();
+      throw popupErr;
+    }
+    if (isCommonEndpointUnsupported(popupErr)) {
+      forgetRedirectReturn();
+      throw popupErr;
+    }
     console.warn("MSAL popup failed, falling back to redirect flow:", popupErr);
-    // Stash the current URL (+ pass it as `state`) so completeRedirectReturn() can bring the
-    // user back here after AAD returns to the fixed redirect URI without our query string.
-    rememberRedirectReturn();
+    // returnHref is already stashed (above); also pass it as `state` as a second channel.
     await msal.loginRedirect({ scopes, state: window.location.href });
     // loginRedirect navigates away; nothing after this line runs in this page load.
     throw new Error("Redirecting for authentication.");

@@ -47,6 +47,8 @@ export function renderField(fieldKey: string, field: FieldConfig, document: Docu
   const container = document.createElement("div");
   container.className = "skye-field";
   container.style.gridArea = fieldKey;
+  // A file field is styled as a tall drop zone that fills its (often row-spanning) grid cell — see form.css.
+  if (field.controlType === "file") container.classList.add("skye-field--file");
 
   // Every field control is identifiable AND labelled:
   //  - `id` (for the label association) + `name` (form-field semantics; the bound SharePoint
@@ -54,7 +56,9 @@ export function renderField(fieldKey: string, field: FieldConfig, document: Docu
   //  - an associated <label for> — or a <legend> for the <fieldset>-based group controls, where
   //    `<label for>` doesn't associate — with the config's `label`, falling back to a humanised
   //    field key so a config that omits `label` still renders an accessible field.
-  const isGroup = field.controlType === "radio" || field.controlType === "checkboxGroup";
+  // Only `radio` still renders as a <fieldset> of inputs needing a <legend>; `checkboxGroup` is now
+  // the skye-multi-select custom element, which takes a normal <label for> like any other control.
+  const isGroup = field.controlType === "radio";
   const isHidden = field.controlType === "hidden";
   const labelText = field.label ?? humanizeFieldKey(fieldKey);
 

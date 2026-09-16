@@ -3,10 +3,12 @@ import { parseCurrentRoute, buildSwitcherRedirectUrl } from "../shared/routing.j
 import { createGraphClient } from "../shared/sharepoint/createGraphClient.js";
 import { createGraphFetch } from "../shared/sharepoint/rawGraphFetch.js";
 import { renderForm } from "../features/form/render/renderForm.js";
+import { mapSharePointFieldsToValues } from "../features/form/submit/mapSharePointFieldsToValues.js";
 import { populateChoiceOptionsFromColumns } from "../features/form/render/populateChoiceOptions.js";
 import { backfillFieldLabels } from "../features/form/render/fieldLabels.js";
 import { registerElements } from "../features/form/registerElements.js";
 import { submitForm } from "../features/form/submit/submitForm.js";
+import { checkPersonFieldsResolve } from "../features/form/submit/checkPersonFields.js";
 import { scriptActions } from "../integrations/registry.js";
 import { canEditFormConfig } from "../features/builder/permissions.js";
 import { getCachedTenantId } from "../shared/auth/tenantResolver.js";
@@ -108,6 +110,29 @@ async function main() {
   // allowed values come live from the list's own column schema (see TODO §6/§7).
   const listColumns = await graph.getListColumns(merged.list.siteId ?? route.siteId, merged.list.id);
   populateChoiceOptionsFromColumns(merged.fields, listColumns);
+
+  // Same idea for a lookupTable's own columns: a `select`/`radio`/`checkboxGroup` column bound to
+  // a Choice column on the RELATED list needs its options from that list's schema, not this one's.
+  // (populateChoiceOptionsFromColumns above only sees the primary list.) Fetched per distinct
+  // related list, in parallel, and skipped entirely if every such column already has static options.
+  await Promise.all(
+    Object.values(merged.fields)
+      .filter((f) => f.controlType === "lookupTable" && f.table?.relatedList?.id)
+      .map(async (f) => {
+        const rl = f.table!.relatedList;
+        const needsLiveChoices = Object.values(f.table!.columns).some(
+          (c) => ["select", "radio", "checkboxGroup"].includes(c.controlType) && c.source === "sharepoint" && !c.options,
+        );
+        if (!needsLiveChoices) return;
+        try {
+          const relatedColumns = await graph.getListColumns(rl.siteId ?? merged.list.siteId ?? route.siteId, rl.id);
+          populateChoiceOptionsFromColumns(f.table!.columns as typeof merged.fields, relatedColumns);
+        } catch (err) {
+          console.warn(`entry-form: couldn't load choice options for lookupTable "${f.label ?? ""}" from related list ${rl.id}.`, err);
+        }
+      }),
+  );
+
   // Guarantee every input field renders with a meaningful <label>: fill any missing `label` from
   // the bound column's displayName (or a humanised field key). renderField.ts still applies its
   // own humanised fallback, so a field with no bound column is covered too.
@@ -119,7 +144,23 @@ async function main() {
     for (const field of Object.values(merged.fields)) field.readonly = true;
   }
 
-  const rendered = renderForm(merged, document, { customValidators });
+  // Edit / view mode: load the existing item and seed the form with its saved values so the
+  // user edits real data rather than a blank form (which would also make every required field
+  // fail validation on the admin approval flow). A load failure falls through to a blank form
+  // rather than dead-ending — the error is logged for diagnosis.
+  let initialValues: Record<string, unknown> | undefined;
+  let editEtag: string | undefined;
+  if ((route.mode === "edit" || route.mode === "view") && route.itemId) {
+    try {
+      const item = await graph.getListItem(merged.list.siteId ?? route.siteId, merged.list.id, route.itemId);
+      initialValues = mapSharePointFieldsToValues(merged.fields, item.fields);
+      editEtag = item.etag;
+    } catch (err) {
+      console.error(`entry-form: couldn't load item "${route.itemId}" for ${route.mode} mode — showing a blank form.`, err);
+    }
+  }
+
+  const rendered = renderForm(merged, document, { customValidators, initialValues });
 
   // The page ships all its states in form.astro; reveal the form screen and fill its slots.
   const screen = showState(appRoot, "screen-form");
@@ -185,6 +226,18 @@ async function main() {
         return;
       }
 
+      // People-picker picks bound to a SharePoint person column can only be written for people
+      // who are already members of this site — resolve them now and block with a field warning
+      // rather than saving the item with those fields silently dropped.
+      const personErrors = await checkPersonFieldsResolve(graph, route.siteId, merged.fields, listColumns, rendered.getValues());
+      if (Object.keys(personErrors).length > 0) {
+        rendered.setExternalErrors(personErrors);
+        statusEl.textContent = "Please fix the highlighted field(s) below.";
+        statusEl.dataset.level = "error";
+        return;
+      }
+      rendered.setExternalErrors({});
+
       // Draft preview: a real submission only happens if the tester explicitly opts in, on top
       // of validation already having passed above — see this file's own docstring.
       if (route.draftId) {
@@ -210,8 +263,10 @@ async function main() {
         siteId: route.siteId,
         mode: route.mode === "edit" ? "edit" : "create",
         itemId: route.itemId,
+        ifMatchEtag: editEtag,
         graph,
         graphFetch,
+        listColumns,
         callbacks: {
           navigate: (to) => window.location.assign(to),
           showMessage: (message, level) => {
@@ -230,8 +285,15 @@ async function main() {
       } else if (!result.success) {
         statusEl.textContent = "Something went wrong submitting this form. Please try again.";
         statusEl.dataset.level = "error";
-      } else if (result.fileUploadErrors && Object.keys(result.fileUploadErrors).length > 0) {
-        statusEl.textContent = `Submitted, but one or more files didn't upload: ${Object.values(result.fileUploadErrors).join("; ")}`;
+      } else if (
+        (result.fileUploadErrors && Object.keys(result.fileUploadErrors).length > 0) ||
+        (result.fieldErrors && Object.keys(result.fieldErrors).length > 0)
+      ) {
+        const parts = [
+          ...Object.values(result.fileUploadErrors ?? {}),
+          ...Object.values(result.fieldErrors ?? {}),
+        ];
+        statusEl.textContent = `Submitted, but some values need a second look: ${parts.join("; ")}`;
         statusEl.dataset.level = "warning";
       } else if (!statusEl.textContent || statusEl.textContent === "Submitting…") {
         // Only show a generic success message if no postAction's showMessage already set something more specific.

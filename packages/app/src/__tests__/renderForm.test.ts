@@ -140,6 +140,50 @@ describe("renderForm (using the real base-form-config fixture)", () => {
       expect(validateAll()).toBe(true);
     });
 
+    it("switching away from a page touches its fields and reveals their errors (and flags the tab)", () => {
+      const config: FormConfig = {
+        list: { id: "list1" },
+        pages: { p1: { title: "One", order: 1 }, p2: { title: "Two", order: 2 } },
+        fields: {
+          need: { page: "p1", source: "sharepoint", bindTo: "Need", controlType: "text", required: true },
+          other: { page: "p2", source: "sharepoint", bindTo: "Other", controlType: "text" },
+        },
+      };
+      const { root, showPage } = renderForm(config, document);
+      const needField = () => root.querySelector('[data-field-key="need"]')!.closest(".skye-field")!;
+      // pristine — no error shown yet
+      expect(needField().classList.contains("skye-field--invalid")).toBe(false);
+
+      showPage("p2"); // leave p1 with its required field empty
+
+      expect(needField().classList.contains("skye-field--invalid")).toBe(true);
+      const p1Tab = Array.from(root.querySelectorAll(".skye-form__tabs button")).find((b) => b.textContent === "One")!;
+      expect(p1Tab.classList.contains("skye-form__tab--error")).toBe(true);
+    });
+
+    it("setExternalErrors marks a field invalid with the given message; a later edit clears it", () => {
+      const config: FormConfig = {
+        list: { id: "list1" },
+        pages: { p1: { title: "Page 1" } },
+        fields: { host: { page: "p1", source: "sharepoint", bindTo: "Host", controlType: "text" } },
+      };
+      const { root, setFieldValue, setExternalErrors } = renderForm(config, document);
+      const message = () => root.querySelector('[data-field-key="host"]')!.closest(".skye-field")!.querySelector(".skye-field__message")!.textContent;
+      const invalid = () => root.querySelector('[data-field-key="host"]')!.closest(".skye-field")!.classList.contains("skye-field--invalid");
+
+      setExternalErrors({ host: "sam@x.edu is not a member of this site." });
+      expect(message()).toBe("sam@x.edu is not a member of this site.");
+      expect(invalid()).toBe(true);
+
+      setFieldValue("host", "someone-else");
+      expect(message()).toBe("");
+      expect(invalid()).toBe(false);
+
+      setExternalErrors({ host: "still bad" });
+      setExternalErrors({});
+      expect(invalid()).toBe(false);
+    });
+
     it("runs a registered custom validator, threaded through via RenderFormOptions", () => {
       const configWithCustomValidator: FormConfig = {
         list: { id: "list1" },
@@ -274,5 +318,28 @@ describe("renderForm — every field is labelled and identifiable", () => {
     const heading = root.querySelector('[data-field-key="sectionTitle"]') as HTMLElement;
     expect(heading.id).toBe(""); // not a form field
     expect(heading.closest(".skye-field")!.querySelector("label[for]")).toBeNull();
+  });
+
+  it("seeds edit-mode controls from initialValues, overriding a field's defaultValue", () => {
+    const config: FormConfig = {
+      list: { id: "list1" },
+      pages: { p1: { title: "P1" } },
+      fields: {
+        name: { page: "p1", source: "sharepoint", bindTo: "Title", controlType: "text", defaultValue: "Untitled" },
+        attendees: {
+          page: "p1", source: "sharepoint", bindTo: "Attendees", controlType: "checkboxGroup",
+          options: [{ value: "a", label: "A" }, { value: "b", label: "B" }, { value: "c", label: "C" }],
+        },
+      },
+    };
+
+    const { root, getValues } = renderForm(config, document, {
+      initialValues: { name: "Kickoff", attendees: ["a", "c"] },
+    });
+
+    const nameInput = root.querySelector('[data-field-key="name"]') as HTMLInputElement;
+    expect(nameInput.value).toBe("Kickoff"); // initialValues won over defaultValue "Untitled"
+    expect(getValues().name).toBe("Kickoff");
+    expect(getValues().attendees).toEqual(["a", "c"]);
   });
 });

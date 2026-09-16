@@ -137,15 +137,22 @@ export const fieldRegistry: Record<string, ControlDefinition> = {
     tag: "fieldset",
     mapAttributes: () => ({}),
     buildChildren: buildChoiceGroup("radio"),
-    valueAccessor: "none", // radio groups are read via a dedicated helper, not the single-element accessor
+    // The <fieldset> itself has no `.value`; renderForm's readControlValue/writeControlValue
+    // special-case an HTMLFieldSetElement and read/write the checked radio's value.
+    valueAccessor: "value",
     changeEvents: ["change"],
   },
   checkboxGroup: {
-    tag: "fieldset",
-    mapAttributes: () => ({}),
-    buildChildren: buildChoiceGroup("checkbox"),
-    valueAccessor: "none",
-    changeEvents: ["change"],
+    // A dropdown-style multi-select (see registerElements.ts's SkyeMultiSelect) rather than an
+    // always-expanded column of checkboxes. Options come from the field's `options` (filled from
+    // the bound SharePoint Choice column), threaded in via configureElement.
+    tag: "skye-multi-select",
+    mapAttributes: (f) => commonInputAttributes(f),
+    configureElement: (el, f) => {
+      (el as unknown as { options?: FieldConfig["options"] }).options = f.options ?? [];
+    },
+    valueAccessor: "value",
+    changeEvents: ["skye-change"],
   },
 
   // --- Content-only virtual controls ---

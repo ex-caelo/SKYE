@@ -155,6 +155,7 @@
 - [x] **(New)** Wiring file selection into form values. — *`file` controlType fields use `valueAccessor: "none"` in `fieldRegistry.ts` (the generic value-reader doesn't handle them), so `renderForm.ts` special-cases `controlType === "file"` to capture the selected `File` object directly from `input.files[0]` on change.*
 - [x] **(New)** Upload failure handling. — *A failed upload doesn't abort the whole submission — it's recorded per-field in `SubmitResult.fileUploadErrors` and that field is left unset (not sent as a raw `File` object, which would break `mapValuesToSharePointFields`). `entry-form.ts` shows a distinct warning-level status message listing which fields failed, alongside an otherwise-successful submission.*
 - [x] **(New, found while testing)** `Blob.arrayBuffer()` isn't implemented by jsdom's `File` polyfill (used in this repo's tests), even though `File`/`Blob`/`FileReader` otherwise work fine there. Fixed by reading file contents via `FileReader` instead (`readFileAsArrayBuffer` in `fileUpload.ts`) — broader environment support, not just a test workaround.
+- [x] **(New pass, 2026-09)** `fileStorage.fileNameTemplate` — an optional string on `fileStorage` that renames the uploaded file instead of keeping the uploader's disk name. Supports `{{fields.<key>}}` (raw value) and `{{date:<key>}}` (a `date`/`datetime-local` value formatted `YYYY.MM.DD`, read from the value's `YYYY-MM-DD` prefix so there's no time-zone day-shift); the original extension is always reattached and characters SharePoint rejects in a name are replaced with spaces. If the template renders empty the original name is kept, so a naming issue never fails an upload. Schema + `types.ts` `FileStorage` updated; `renderUploadFileName` added to `fileUpload.ts` and `submitForm.ts` now threads `values` into `uploadFieldFile` (5th arg, defaulted to `{}` so existing callers/tests are unaffected). Motivated by the Luddy LLC event-proposal form, whose poster must land in `Documents/PHOTOS!/Event Posters/2026-2027` as `2026.xx.xx <Event Name> Poster`. 5 new `renderUploadFileName` tests + 1 `uploadFieldFile` test in `fileUpload.test.ts`.
 
 ## 11. Graph throttling, pagination & batching
 
@@ -1045,3 +1046,347 @@ dynamic `import()`, confirmed via `sample`) and Vitest 2 crawls (65s for
 ---
 
 **Status:** Everything through §12 is now done except the items explicitly called out as open below — schema, `packages/skye-config`, `MOCK_GRAPH` fixtures, the `packages/app` render layer, the submit/postAction pipeline, real Web Component implementations, `calculatedDisplay` reactivity, etag-conflict UX, lookupTable row deletion, the site switcher (Graph `/search/query`, exact-match filtering to `skye_data` folders), file uploads (`library` mode; `attachment` mode deliberately unimplemented with an honest explanation), and Turborepo task orchestration (§15) — **97 tests passing across both packages** (40 in `@skye/config`, 57 in `@skye/app`), both type-check clean, and a full Astro production build succeeds, all runnable via `turbo run <task>` with confirmed caching. `skye-richtext` was deliberately simplified to a minimal HTML/CSS-only placeholder (no `execCommand`, no formatting logic) per explicit instruction, replacing an earlier toolbar implementation. **Remaining open items** (see §13 and "Newly discovered gaps" above): an ARIA pass on the now-functional components, choosing and integrating a real editor library for `skye-richtext`, MSAL redirect-fallback state recovery, and verifying `searchSitesWithSkyeData`/list-column caching/etc. against a real tenant. See `CLAUDE.md` for the running summary and repo conventions.
+
+---
+
+## 22. Multi-value controls + real Person/Choice column writes (new pass, 2026-09)
+
+Driven by testing the Luddy LLC event-proposal form against a live tenant.
+
+- [x] **`peoplePicker` is now a token/chip multi-picker.** Each chosen
+  person is a discrete removable unit (chip with an ×; Backspace on the
+  empty input removes the last) — no delimiter is ever shown or typed.
+  `SkyePeoplePicker` (`registerElements.ts`) no longer extends
+  `SkyeSearchPicker` (which stays for the single-value `lookupPicker`).
+  `.value` is a `string[]` of keys — each person's email when the
+  directory result has one, else their directory id. `set value` also
+  accepts a single string or an array of SharePoint person objects
+  (`{ Email | LookupValue | … }`) via `normalisePeopleValue`, so an
+  edit-mode prefill of a Person column shows chips.
+- [x] **`checkboxGroup` is now a dropdown multi-select** (`skye-multi-select`),
+  not an always-expanded column of checkboxes: a trigger button that
+  summarises the selection ("Alpha, Beta" / "4 selected") and a
+  click-away-closable panel of checkable options. Options are threaded in
+  via `fieldRegistry`'s `configureElement` hook from the field's
+  `options` (which `populateChoiceOptionsFromColumns` still fills from the
+  bound Choice column). `.value` is a `string[]`; `set value` splits a
+  `"; "`/`","`-joined string too. `renderField`'s `isGroup` branch is now
+  `radio`-only — `checkboxGroup` takes a normal `<label for>`.
+- [x] **`radio` value is actually read now.** It had `valueAccessor:
+  "none"`, so a `<fieldset>`-based radio group never populated `values` —
+  meaning a `visibleIf` keyed off a radio field (e.g. "show the Purchase
+  Table when Requires Purchases = Yes") could never fire. `radio` is now
+  `valueAccessor: "value"` and `renderForm`'s `readControlValue` /
+  `writeControlValue` special-case an `HTMLFieldSetElement` (read the
+  checked input's value; write by matching `input.value`).
+- [x] **Real SharePoint encoding for Person + multi-Choice columns** —
+  new `features/form/submit/encodeSharePointFields.ts`
+  (`buildPrimarySharePointFields`), used for the primary item write in
+  `submitForm.ts` in place of `mapValuesToSharePointFields` (which stays
+  for lookupTable rows). Keyed off the live column type from
+  `getListColumns`:
+  - `personOrGroup` → each identifier resolved via the new
+    `GraphClient.resolveSiteUserId(siteId, identifier)` (looks the person
+    up in the site's hidden **User Information List** — server-side
+    `$filter` on `EMail`/`UserName` with a
+    `HonorNonIndexedQueriesWarningMayFailRandomly` Prefer header, then a
+    bounded local scan) → `<col>LookupId` (scalar for single-value,
+    `Collection(Edm.Int32)` for multi via the new `allowMultiple` flag on
+    `GraphListColumn`, read from Graph's `allowMultipleSelection` facet).
+  - `choice` + a `checkboxGroup` field → `Collection(Edm.String)`.
+  - a stray array anywhere else → joined with `"; "` (never `[object Object]`).
+  An unresolvable person is reported in the new `SubmitResult.fieldErrors`
+  (surfaced by `page-scripts/form.ts` as a "some values need a second
+  look" warning) and that field left unwritten — the item still saves.
+  **`resolveSiteUserId`'s real path is unverified against a live tenant.**
+- [x] **`isEmpty` (form-config `nativeValidators.ts`) is array-aware** — a
+  `required` multi-select / people picker with `[]` now fails `required`
+  like an empty text box.
+- [x] **`fileStorage` / poster** — file fields render as a tall dashed
+  drop zone (`.skye-field--file` in `form.css`) that fills a row-spanning
+  grid cell.
+- **495 tests** (83 `@skye/form-config` + 412 `@skye/app`), type-check
+  clean, Astro build of all 7 pages OK, `lint:configs` green on the
+  `luddy-llc-event-proposal` config.
+
+---
+
+## 23. Dedicated MSAL redirect page + responsive form layout + live-tenant testing (new pass, 2026-09)
+
+Driven by testing the Luddy LLC event-proposal form in a real headed
+browser against the IU tenant.
+
+- [x] **`/auth` — a dedicated, minimal MSAL redirect landing page.**
+  `redirectUri` was `window.location.origin` (the index SPA), so a
+  `loginPopup` sent the popup to the full app ("mini SKYE"), MSAL's popup
+  handshake never completed, and every sign-in timed out after 60s and
+  fell back to `loginRedirect`. New `shared/auth/redirectUri.ts`
+  (`authRedirectUri()` → `${origin}/auth`), `pages/auth.astro` (no
+  BaseLayout, no stylesheets — just "Signing you in…"), and
+  `page-scripts/auth.ts`: in a popup, settle MSAL and let the opener close
+  the window (self-close fallback after 4s); in a full-page redirect, run
+  the existing `completeRedirectReturn()` and navigate back.
+  `authProvider.ts` and `redirectReturn.ts` now use `authRedirectUri()`;
+  `findClientIdInMsalCache` is exported for the new page. **Deployment: the
+  Entra app registration must add `<origin>/auth` as an SPA redirect URI.**
+  Verified end-to-end against the live tenant — sign-in completes through
+  `/auth`, no app flash.
+- [x] **Responsive form layout.** `public/styles/form.css` gained a
+  `@media (max-width: 700px)` block that collapses every page's grid to a
+  single stacked column. It overrides only the grid *tracks*
+  (`grid-template-columns/areas/rows` + each field's inline
+  `grid-area:<key>`), never `display` — `renderForm`'s `showPage()` hides
+  inactive tab pages with an inline `display:none`, and an earlier attempt
+  that set `display:block !important` re-showed all four tabs at once. The
+  file drop-zone shrinks and the lookupTable scrolls within its own field
+  (`overflow-x:auto`). Verified on a 390×844 emulated phone.
+- [x] **`GraphClient.resolveSiteUserId` hardened.** The single
+  `$filter=fields/EMail eq …` returned empty for real IU users, so it now
+  tries `EMail` / `UserName` / `Name` filters, then a **bounded** (3-page)
+  scan matching any of those plus the `i:0#.f|membership|<upn>` claims
+  format. Bounded deliberately — an unbounded paginated scan turned one
+  submit into dozens of sequential Graph round-trips (caught in live
+  testing: the submit hung mid-pagination). A person who has never visited
+  the site still won't resolve (Graph can't "ensure" a new user); the
+  encoder already reports that and leaves the field blank.
+- [x] **Encoder: `checkboxGroup` bound to a single-value Choice column**
+  now writes the first selection + a `fieldErrors` warning instead of
+  sending a `Collection(Edm.String)` that SharePoint 400s. Still defaults
+  to the collection when Graph doesn't positively report the column as
+  single (`allowMultiple === false`), since the `choice` facet often omits
+  the flag for a genuinely multi-value column.
+- **Live-tenant findings (not code — the form's list needs work):** the
+  Events list has **no `EventType` column** (`bindTo` repointed to
+  `HostRole`, whose choices match); several `bindTo` names were wrong
+  (`Photographer_x0028_s_x0029_`, `StudentImpact_x002c_EventGoalsan`,
+  `BeInvolved_x0020_Event_x0020_Id`, `ProposalResponseText`) — all
+  corrected in `skye_data/forms/luddy-llc-event-proposal/`. Multi-value
+  Choice encoding (`Location@odata.type: Collection(Edm.String)`) and the
+  full form-fill → real `POST /lists/…/items` path are confirmed working;
+  the write currently 400s only on the missing `EventType`/`HostRole`
+  binding until the config is re-uploaded.
+- **495 tests green** (83 `@skye/form-config` + 412 `@skye/app`),
+  type-check clean, Astro build of all 8 pages OK, `lint:configs` green.
+
+### 23a. Follow-up — non-site people block the submit (not silently dropped)
+
+Per user feedback: a people picker bound to a `personOrGroup` column, when
+a picked person can't be resolved to a member of the site, must **fail
+validation and block the submit** with a field-level warning — not save
+the item with that field blank.
+
+- `page-scripts/form.ts` runs the new
+  `features/form/submit/checkPersonFields.ts`
+  (`checkPersonFieldsResolve`) after `validateAll()` and before
+  `submitForm` (and before the draft-preview dialog): for every
+  `source:"sharepoint"` `peoplePicker` bound to a `personOrGroup` column,
+  it resolves each pick via `graph.resolveSiteUserId` (session-cached, so
+  the encoder's later call is free) and returns `{ fieldKey: message }`
+  for any field with an unresolvable pick, naming the person(s).
+- `renderForm` gained `setExternalErrors(Record<string,string>)` — merges
+  caller-supplied field errors on top of the normal validation (they win,
+  shown regardless of "touched"), marks those fields invalid, and
+  re-renders. Any subsequent field edit (change event OR `setFieldValue`)
+  clears them; `setExternalErrors({})` clears explicitly. Non-empty
+  result → `form.ts` shows "fix the highlighted field(s)" and returns
+  without submitting.
+- The encoder's own `errors` path for an unresolved person stays as
+  defense in depth but should now be unreachable on the live path.
+- Virtual people pickers (e.g. the overlay's `reviewer`, which only feeds
+  a Teams postAction) are not checked — a non-site person is fine there.
+- 5 new tests (`checkPersonFields.test.ts` ×4, a `setExternalErrors` case
+  in `renderForm.test.ts`). **500 tests green** (83 + 417).
+
+### 23b. Follow-up — validate on page switch; trim the switcher's load path
+
+Two user asks after live testing.
+
+**Validation runs on page switch** (`renderForm.ts`): `showPage()` now
+touches every field on the page being *left* and re-runs
+`updateValidationDisplay()`, so a problem shows the moment you navigate
+away — not only at Submit. `updateValidationDisplay()` additionally
+toggles `.skye-form__tab--error` on any tab whose page has a shown error
+(red label + a `●`, in `form.css`), so an error on a page you're not
+looking at is still visible. No-op on the initial render.
+
+**Site-switcher / sign-in load path, reviewed in a browser against the
+real tenant** (`_drive-switcher.mjs`, gitignored). The critical path from
+"token acquired" to the form/view picker was ~4.5s of serial Graph calls;
+cuts:
+
+- **`canWriteSkyeData` is a write probe** (PUT + DELETE of a marker file —
+  two round-trips) and it ran on *every* `/switcher`, `/form` and
+  `/builder` load just to gate a "Create/Edit in Builder" link. Now
+  `RealGraphClient` caches the result in `sessionStorage`
+  (`skye:canWrite:<siteId>`) and re-probes only once per site per browser
+  session; `installSkyeSiteConfig` clears it for the site it set up.
+- **The switcher no longer blocks the picker on that probe.**
+  `canBuildPromise` is resolved in the background (`builderEditors` is a
+  cheap synchronous check; the probe only runs if that misses), and
+  `wireCreateNewFormConfig()` (split out of `populateFormOrViewPicker`)
+  flips the link on when it lands.
+- **`getSkyeSiteConfigFiles` + `listSkyeForms` + `listSkyeViews` now run
+  in parallel** instead of config-then-lists — the `home` redirect still
+  wins when set (the two list reads are then wasted, a rare path). All
+  three resolve the same cached Site Assets drive id, so concurrent
+  callers share one lookup. `SkyeNotConfiguredError` from the list calls
+  is swallowed (the config result owns that case); any other list error
+  still bubbles.
+
+`_drive-switcher.mjs` confirms the warm (second) `/switcher` load makes
+**zero write calls** (cold load still does the one probe). Tests + type-
+check green (**501 total**).
+
+### 23c. Follow-up — full form test against the tenant: bugs found + fixed
+
+A comprehensive headed-browser run (`_drive-full.mjs`, gitignored) — every
+field type, poster upload, purchase-table row, then re-open in edit mode.
+
+**Confirmed working end-to-end against the live list:** item creation
+(`POST 201`); **person columns** — single (`HostLookupId: 14`) and
+multi (`Photographer_x0028_s_x0029_LookupId` as `Collection(Edm.Int32)`),
+resolved via `resolveSiteUserId`; **all multi-value Choice** as
+`Collection(Edm.String)` (Location, Categories, StudentSuccessDomain,
+NACECompetencies); dates, text, `HostRole`, `Attire`, `RequiresPurchases`;
+page-switch validation + the tab error markers.
+
+**Bugs fixed:**
+
+- **`ReferenceError: Buffer is not defined` on every library file upload.**
+  `@microsoft/microsoft-graph-client`'s `serializeContent()` calls
+  `Buffer.from()` on an `ArrayBuffer`/TypedArray request body — a Node
+  global, absent in the browser. `uploadToLibrary` now wraps the data in a
+  `Blob` (the one binary body shape the SDK passes through untouched).
+  Confirmed: the poster then `PUT 201`s to
+  `…/PHOTOS!/Event Posters/2026-2027/<templated name>.png`.
+- **Blocked submit didn't move you to the problem.** `renderForm` gained
+  `focusFirstError()` — `validateAll()` (on fail) and `setExternalErrors()`
+  (when non-empty) now jump to the page of the first field showing an
+  error and scroll it into view. Pairs with the tab `●` marker.
+- **Raw JS errors leaked into the user-facing status.** A failed file
+  upload put `err.message` straight into the "some values need a second
+  look" line (the user saw "Buffer is not defined"). `submitForm` now
+  writes a plain sentence naming the field; the real error still goes to
+  the console.
+
+**Config (`luddy-llc-event-proposal`) — corrected from the live list:**
+
+- `poster` → `source: "virtual"` (dropped `bindTo`). The `Poster` column
+  is a Thumbnail/Image column; writing the uploaded file's URL string to
+  it `500`s ("General exception"). Virtual = the file still uploads to the
+  library folder, it just isn't written to a column.
+- `recordBeInvolvedIds` postAction: PATCH `body` key `BeInvolvedEventId` →
+  `BeInvolved_x0020_Event_x0020_Id`, and the placeholder site/list ids in
+  its URL filled in.
+
+**500+ tests green**, type-check + `lint:configs` clean.
+
+### 23d. Edit / view-mode prefill + the remaining config corrections
+
+The comprehensive test's biggest gap: `page-scripts/form.ts` never loaded
+the existing item, so `#luddy-llc-event-proposal/<itemId>` (edit) and
+`…/<itemId>/view` rendered a **blank** form — editing was impossible and
+the admin Approval flow's required fields all failed `validateAll()`.
+
+- **`renderForm` gained `RenderFormOptions.initialValues`** — a value map
+  applied after every field renders (so it wins over `defaultValue`) and
+  written straight onto the controls, so people-picker chips and
+  multi-select dropdowns show the saved data, not just plain inputs.
+- **`submit/mapSharePointFieldsToValues.ts`** (new) — the inverse of the
+  submit encoder. Reads only `source: "sharepoint"` fields with a
+  `bindTo`; passes a person column's `{ LookupId, LookupValue }` (or its
+  `<bindTo>LookupId` array) straight through; trims a SharePoint ISO
+  datetime to what `<input type=date|datetime-local>` accepts; leaves a
+  multi-value Choice array untouched.
+- **`page-scripts/form.ts`** — for `route.mode` `edit`/`view` with an
+  `itemId`, `await graph.getListItem(...)` → `mapSharePointFieldsToValues`
+  → `renderForm(..., { initialValues })`, and the item's `etag` is now
+  threaded into `submitForm` as `ifMatchEtag` so an edit is a real
+  optimistic-concurrency write. A load failure logs and falls through to a
+  blank form rather than dead-ending.
+- **`resolveSiteUserId` numeric short-circuit** (real + mock) — an
+  edit-mode person seed carries the already-resolved User Information List
+  id; `/^\d+$/` returns it as-is instead of re-running the email/UPN scan
+  (which would fail on a bare number and drop the person on re-save).
+- **`normalisePeopleValue` key priority** — `LookupId` now sits ahead of
+  the display name, so a seeded person with no email keys on its numeric
+  id and re-saves through the short-circuit above.
+
+**Config (`luddy-llc-event-proposal`) — remaining corrections:**
+
+- Purchases list schema dumped from the live list. `relatedList.id` set to
+  the real GUID `3ad9fead-6ec6-473b-93d3-b0aeeaef427c`; row column
+  `bindTo`s corrected to SharePoint's actual internal names — `LinktoItem`
+  (lowercase t) and `PriceperUnit` (lowercase p), not the camel-case
+  guesses. `parentReferenceColumn` set to `k62e361189_d041078067_rlu` —
+  the list has **two** auto-named lookup columns back to the Events list
+  (`…_d041078067_rlu`, `…_5dc8796ea4_rlu`) and which one is the true
+  parent reference still needs one live row-save to confirm (README §2
+  documents the swap). `store` (Choice) still renders an empty dropdown —
+  per-table-column choice loading from the related list isn't built;
+  README flags adding static `options` or using `text` as the stopgap.
+- **Admin overlay `decisionRecorded`** gained a `when` guard
+  (`status in [Approved, Denied]`) so "Decision recorded and the host has
+  been notified." no longer fires on a routine admin save; a new
+  `changesSaved` message covers the other case.
+- Still a placeholder: `createBeInvolvedEvent.args[0].submittedByOrganizationId: 0`.
+
+**507 tests green** (83 `@skye/form-config` + 424 `@skye/app`),
+type-check + `lint:configs` + Astro build all clean.
+
+### 23e. Live-tenant test round 2 — findings + two more fixes
+
+Re-ran the full headed driver against the tenant. What the run proved:
+
+- **Edit / view-mode prefill works against a real item** (item 264):
+  every text field, both datetimes (stored UTC, correctly trimmed to
+  `datetime-local` format), all four multi-Choice dropdowns, `HostRole`,
+  `Attire`, and person **chips** all repopulated. Multi-person
+  (`Photographer(s)`) came back as the full `{LookupId, LookupValue,
+  Email}` object and its chip shows the name; a **single**-person column
+  (`Host`) came back as just `"14"` from Graph, so that chip's label reads
+  "14" — value still correct, re-saves fine, only the label is cosmetic.
+- **Person + multi-Choice encoding on create** all correct
+  (`HostLookupId: 14`, `…LookupId` as `Collection(Edm.Int32)`, every
+  `checkboxGroup` as `Collection(Edm.String)`).
+- **Poster upload** `PUT 201` to
+  `…/PHOTOS!/Event Posters/2026-2027/<templated name>.png`.
+- **Page-switch validation** flags both visited-but-incomplete tabs.
+- The run also **confirmed the deployed SharePoint config is the
+  pre-fix version** — a create with a poster `POST 500`s (still binds the
+  `Poster` image column), the Purchase row write `400`s
+  (`EventProposalLookupId` — old `parentReferenceColumn`), and
+  `decisionRecorded` fires on a plain submit (no `when` guard). All three
+  are fixed in the local config; they need the corrected files uploaded to
+  `Site Assets/skye_data/forms/luddy-llc-event-proposal/`.
+
+**Fix — first-time popup sign-in was losing the URL.** `page-scripts/auth.ts`'s
+popup branch was constructing its own `PublicClientApplication` and calling
+`handleRedirectPromise()`. On a same-origin popup the **opener's** MSAL
+instance reads the `#code=…` fragment straight off the popup; running MSAL
+*in* the popup raced it and, when the popup won, stripped the fragment
+before the opener could read it. `loginPopup` then timed out and fell back
+to a full-page redirect — which, if `completeRedirectReturn()` couldn't
+recover the start URL, dumped the user on the bare origin with
+`siteId`/`applicationId`/the form id all gone, and the main tab never
+finished authenticating. Now the popup branch does **nothing** to the URL
+(just a self-close fallback), matching MSAL's "blank redirect page"
+guidance. Belt-and-braces: `authProvider.ts` now `rememberRedirectReturn()`s
+*before* the popup attempt (not only before the redirect fallback), clears
+it on popup success (`forgetRedirectReturn`), and `auth.ts`'s non-popup
+branch falls back to that stashed URL instead of `/` when there's no
+fragment to process. New `getRedirectReturn` / `forgetRedirectReturn`
+helpers; 2 new tests.
+
+**Fix — a lookupTable's `select` columns rendered as empty dropdowns.**
+`populateChoiceOptionsFromColumns` only ever saw the *primary* list's
+columns, so a table column bound to a Choice column on the **related**
+list (the Purchase Table's `Store`) got no options. `page-scripts/form.ts` now
+fetches each distinct related list's column schema (in parallel, skipped
+when every such column already has static `options`) and fills them —
+so `Store` populates live from the Purchases list's own choices
+(`In-Person: Kroger` … `Software/Digital`) regardless of what the config
+says. The config also gets those choices as static `options` as a
+fallback.
+
+**508 tests green** (83 `@skye/form-config` + 425 `@skye/app`), type-check + `lint:configs` + build clean.

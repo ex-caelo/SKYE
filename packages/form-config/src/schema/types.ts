@@ -50,6 +50,8 @@ export interface ValidationMessages {
 
 export interface FileStorage {
   target?: "attachment" | "library";
+  /** Renames the uploaded file. Supports {{fields.<key>}} and {{date:<key>}} (formatted YYYY.MM.DD) placeholders; the original extension is always kept. See the schema description. */
+  fileNameTemplate?: string;
   library?: { driveId: string; siteId?: string; folderPath?: string };
 }
 

@@ -1,0 +1,226 @@
+{
+  "id": "luddy-llc-event-proposal",
+  "description": "Adds the admin-only Approval page. Merged on top of the base form only for users who can open this 'admin' folder in SharePoint.",
+  "pages": {
+    "approval": {
+      "title": "Approval",
+      "order": 4,
+      "layout": {
+        "gridTemplateColumns": 2,
+        "gap": "1.5rem",
+        "gridTemplateAreas": [
+          "statusHeading statusHeading",
+          "status purchaseStatus",
+          "beInvolvedHeading beInvolvedHeading",
+          "hostEmail hostEmail",
+          "attendanceCode beInvolvedEventId",
+          "reviewer reviewer",
+          "actionsHeading actionsHeading",
+          "approvalComments approvalComments"
+        ]
+      }
+    }
+  },
+  "fields": {
+    "statusHeading": {
+      "page": "approval",
+      "order": 1,
+      "source": "virtual",
+      "controlType": "heading",
+      "label": "Current Status"
+    },
+    "status": {
+      "page": "approval",
+      "order": 2,
+      "source": "sharepoint",
+      "bindTo": "Status",
+      "controlType": "select",
+      "label": "Status",
+      "options": [
+        { "value": "Draft", "label": "Draft" },
+        { "value": "Submitted", "label": "Submitted" },
+        { "value": "Approved", "label": "Approved" },
+        { "value": "Denied", "label": "Denied" }
+      ]
+    },
+    "purchaseStatus": {
+      "page": "approval",
+      "order": 3,
+      "source": "sharepoint",
+      "bindTo": "PurchaseStatus",
+      "controlType": "select",
+      "label": "Purchase Status",
+      "options": [
+        { "value": "Not Purchased", "label": "Not Purchased" },
+        { "value": "Ordered", "label": "Ordered" },
+        { "value": "Partially Received", "label": "Partially Received" },
+        { "value": "Received", "label": "Received" }
+      ]
+    },
+    "beInvolvedHeading": {
+      "page": "approval",
+      "order": 4,
+      "source": "virtual",
+      "controlType": "heading",
+      "label": "BeInvolved Data"
+    },
+    "hostEmail": {
+      "page": "approval",
+      "order": 5,
+      "source": "virtual",
+      "controlType": "text",
+      "label": "Host campus email",
+      "helpText": "The host's @iu.edu email. Used as the BeInvolved event submitter — the people picker on Metrics stores a directory ID, not an email address.",
+      "attributes": { "inputmode": "email" }
+    },
+    "attendanceCode": {
+      "page": "approval",
+      "order": 6,
+      "source": "sharepoint",
+      "bindTo": "AttendanceScannerAccessCode",
+      "controlType": "text",
+      "label": "Attendance Scanner Access Code",
+      "readonly": true,
+      "helpText": "Filled in automatically once the event is approved and created in BeInvolved."
+    },
+    "beInvolvedEventId": {
+      "page": "approval",
+      "order": 7,
+      "source": "sharepoint",
+      "bindTo": "BeInvolved_x0020_Event_x0020_Id",
+      "controlType": "text",
+      "label": "BeInvolved Event Id",
+      "readonly": true
+    },
+    "reviewer": {
+      "page": "approval",
+      "order": 8,
+      "source": "virtual",
+      "controlType": "peoplePicker",
+      "label": "Notify in Teams (pick yourself)",
+      "helpText": "A Teams group chat is created with this person and the host to deliver the decision. Pick yourself so the chat can be created."
+    },
+    "actionsHeading": {
+      "page": "approval",
+      "order": 9,
+      "source": "virtual",
+      "controlType": "heading",
+      "label": "Approval Actions"
+    },
+    "approvalComments": {
+      "page": "approval",
+      "order": 10,
+      "source": "sharepoint",
+      "bindTo": "ProposalResponseText",
+      "controlType": "textarea",
+      "label": "Enter comments to be sent to the host and cohosts",
+      "attributes": { "rows": 5 }
+    }
+  },
+  "postActions": {
+    "createBeInvolvedEvent": {
+      "trigger": "afterSubmit",
+      "type": "script",
+      "functionName": "engage.createEvent",
+      "label": "Create the event in BeInvolved",
+      "loadingMessage": "Creating the event in BeInvolved…",
+      "when": { "field": "status", "operator": "equals", "value": "Approved" },
+      "args": [
+        {
+          "submittedByOrganizationId": 0,
+          "submittedById": { "campusEmail": "{{fields.hostEmail}}" },
+          "name": "{{fields.eventTitle}}",
+          "description": "{{fields.eventDescription}}",
+          "startsOn": "{{fields.startTime}}",
+          "endsOn": "{{fields.endTime}}",
+          "address": { "name": "{{fields.location}}" },
+          "visibility": "Institution"
+        }
+      ]
+    },
+    "recordBeInvolvedIds": {
+      "trigger": "afterSubmit",
+      "type": "graphRequest",
+      "label": "Save the BeInvolved event id and attendance code onto the event",
+      "dependsOn": ["createBeInvolvedEvent"],
+      "request": {
+        "url": "/sites/b5a3efce-2a68-4fa3-9bbb-ba300ede5f73/lists/62e36118-9efa-43b8-a539-18f0d73fff34/items/{{item.id}}/fields",
+        "method": "PATCH",
+        "body": {
+          "BeInvolved_x0020_Event_x0020_Id": "{{results.createBeInvolvedEvent.eventId}}",
+          "AttendanceScannerAccessCode": "{{results.createBeInvolvedEvent.accessCode}}"
+        }
+      }
+    },
+    "openTeamsChatApproved": {
+      "trigger": "onSuccess",
+      "type": "script",
+      "functionName": "teams.createChat",
+      "label": "Open a Teams chat with the host",
+      "when": { "field": "status", "operator": "equals", "value": "Approved" },
+      "args": [
+        {
+          "memberUserIds": ["{{fields.host}}", "{{fields.reviewer}}"],
+          "chatType": "group",
+          "topic": "{{fields.eventTitle}} — approved"
+        }
+      ]
+    },
+    "sendApprovalMessage": {
+      "trigger": "onSuccess",
+      "type": "script",
+      "functionName": "teams.sendMessage",
+      "label": "Send the attendance code to the host",
+      "dependsOn": ["openTeamsChatApproved"],
+      "args": [
+        {
+          "chatId": "{{results.openTeamsChatApproved.chatId}}",
+          "message": "<p><strong>{{fields.eventTitle}}</strong> has been approved. 🎉</p><p>Attendance scanner access code: <strong>{{results.createBeInvolvedEvent.accessCode}}</strong></p><p>BeInvolved event id: {{results.createBeInvolvedEvent.eventId}}</p><p>{{fields.approvalComments}}</p>"
+        }
+      ]
+    },
+    "openTeamsChatDenied": {
+      "trigger": "onSuccess",
+      "type": "script",
+      "functionName": "teams.createChat",
+      "label": "Open a Teams chat with the host",
+      "when": { "field": "status", "operator": "equals", "value": "Denied" },
+      "args": [
+        {
+          "memberUserIds": ["{{fields.host}}", "{{fields.reviewer}}"],
+          "chatType": "group",
+          "topic": "{{fields.eventTitle}} — not approved"
+        }
+      ]
+    },
+    "sendDenialMessage": {
+      "trigger": "onSuccess",
+      "type": "script",
+      "functionName": "teams.sendMessage",
+      "label": "Send the decision to the host",
+      "dependsOn": ["openTeamsChatDenied"],
+      "args": [
+        {
+          "chatId": "{{results.openTeamsChatDenied.chatId}}",
+          "message": "<p>Your event proposal <strong>{{fields.eventTitle}}</strong> was not approved.</p><p>{{fields.approvalComments}}</p>"
+        }
+      ]
+    },
+    "decisionRecorded": {
+      "trigger": "onSuccess",
+      "type": "showMessage",
+      "label": "Confirm the decision",
+      "when": { "field": "status", "operator": "in", "value": ["Approved", "Denied"] },
+      "message": "Decision recorded and the host has been notified.",
+      "level": "success"
+    },
+    "changesSaved": {
+      "trigger": "onSuccess",
+      "type": "showMessage",
+      "label": "Confirm a non-decision save",
+      "when": { "field": "status", "operator": "notIn", "value": ["Approved", "Denied"] },
+      "message": "Changes saved. No approval decision was recorded, so the host was not notified.",
+      "level": "success"
+    }
+  }
+}

@@ -14,16 +14,35 @@
 // the retry acquires a token silently.
 
 import { PublicClientApplication } from "@azure/msal-browser";
+import { authRedirectUri } from "./redirectUri.js";
 
 const RETURN_KEY = "skye:auth:returnHref";
 
-/** Call immediately before `msal.loginRedirect()`. */
+/** Call before any interactive sign-in step (popup or redirect), so a degraded popup that turns into a full-page redirect can still return here. */
 export function rememberRedirectReturn(): void {
   try {
     sessionStorage.setItem(RETURN_KEY, window.location.href);
   } catch {
     // sessionStorage unavailable — the flow will still complete via MSAL's `state` fallback below,
     // or land on the bare redirect URI. Nothing more we can do here.
+  }
+}
+
+/** Clear the stashed return URL — call once a popup sign-in succeeded (the window never navigated, so there's nothing to return to) or the attempt was abandoned. */
+export function forgetRedirectReturn(): void {
+  try {
+    sessionStorage.removeItem(RETURN_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+/** The stashed pre-sign-in URL, if any — used by the `/auth` landing page as a last-resort navigation target. */
+export function getRedirectReturn(): string | null {
+  try {
+    return sessionStorage.getItem(RETURN_KEY);
+  } catch {
+    return null;
   }
 }
 
@@ -41,8 +60,8 @@ function safeUrl(value: string): URL | null {
   }
 }
 
-/** Scans MSAL's own `msal.<clientId>.…` sessionStorage keys to recover a client id when we have no stash. */
-function findClientIdInMsalCache(): string | undefined {
+/** Scans MSAL's own `msal.<clientId>.…` sessionStorage keys to recover a client id when we have no stash. Also used by the dedicated `/auth` landing page (page-scripts/auth.ts) to rebuild the right MSAL instance. */
+export function findClientIdInMsalCache(): string | undefined {
   try {
     for (let i = 0; i < sessionStorage.length; i++) {
       const match = (sessionStorage.key(i) ?? "").match(/^msal\.([0-9a-fA-F-]{36})\./);
@@ -82,7 +101,8 @@ export async function completeRedirectReturn(): Promise<boolean> {
       auth: {
         clientId,
         authority: `https://login.microsoftonline.com/${tenantId ?? "common"}`,
-        redirectUri: window.location.origin,
+        // Must match the redirectUri the loginRedirect request was made with (see redirectUri.ts).
+        redirectUri: authRedirectUri(),
       },
       cache: { cacheLocation: "sessionStorage" },
     });

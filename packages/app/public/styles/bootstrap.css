@@ -1,19 +1,49 @@
 @charset "UTF-8";
-body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-  line-height: 1.2;
-  margin: 20px auto;
-  color: #363636;
-  text-rendering: optimizeLegibility;
+
+* {
+	--background: white;
+	--background-secondary: #efefef;
+	--background-lightest: #f9f8f8;
+	--text-primary: #363636;
+	--text-secondary: #ccc;
+	--text-invert: white;
+	--primary-medium: #4187cc;
+	--primary-light: #cae1f9;
+	--primary-lightest: #f1f8ff;
+	--border: rgba(0, 0, 0, 0.25);
+	--border-size: 1.1px;
+	--danger: #b91c1c;
+	--danger-light: #ffe5e5;
+  --border-radius: 6px;
 }
 
-button, input, textarea {
-  transition: background-color 0.1s linear, border-color 0.1s linear, color 0.1s linear, box-shadow 0.1s linear, transform 0.1s ease;
+body {
+	font-family:
+		system-ui,
+		-apple-system,
+		BlinkMacSystemFont,
+		"Segoe UI",
+		"Roboto",
+		"Oxygen",
+		"Ubuntu",
+		"Cantarell",
+		"Fira Sans",
+		"Droid Sans",
+		"Helvetica Neue",
+		sans-serif;
+	line-height: 1.2;
+	margin: 20px auto;
+	color: #363636;
+	text-rendering: optimizeLegibility;
 }
+
+/* button, input, textarea {
+  transition: background-color 0.1s linear, border-color 0.1s linear, color 0.1s linear, box-shadow 0.1s linear, transform 0.1s ease;
+} */
 
 h1 {
-  font-size: 2.2em;
-  margin-top: 0;
+	font-size: 2.2em;
+	margin-top: 0;
 }
 
 h1,
@@ -22,7 +52,7 @@ h3,
 h4,
 h5,
 h6 {
-  margin-bottom: 12px;
+	margin-bottom: 12px;
 }
 
 h1,
@@ -32,7 +62,7 @@ h4,
 h5,
 h6,
 strong {
-  color: #000000;
+	color: #000000;
 }
 
 h1,
@@ -44,184 +74,185 @@ h6,
 b,
 strong,
 th {
-  font-weight: 600;
+	font-weight: 600;
 }
 
 blockquote {
-  border-left: 4px solid #0096bfab;
-  margin: 1.5em 0em;
-  padding: 0.5em 1em;
-  font-style: italic;
+	border-left: 4px solid #0096bfab;
+	margin: 1.5em 0em;
+	padding: 0.5em 1em;
+	font-style: italic;
 }
 
 blockquote > footer {
-  margin-top: 10px;
-  font-style: normal;
+	margin-top: 10px;
+	font-style: normal;
 }
 
 blockquote cite {
-  font-style: normal;
+	font-style: normal;
 }
 
 address {
-  font-style: normal;
+	font-style: normal;
 }
 
-a[href^='mailto']::before {
-  content: '📧 ';
+a[href^="mailto"]::before {
+	content: "📧 ";
 }
 
-a[href^='tel']::before {
-  content: '📞 ';
+a[href^="tel"]::before {
+	content: "📞 ";
 }
 
-a[href^='sms']::before {
-  content: '💬 ';
+a[href^="sms"]::before {
+	content: "💬 ";
 }
 
 button,
-input[type='submit'],
-input[type='button'],
-input[type='checkbox'] {
-  cursor: pointer;
+input[type="submit"],
+input[type="button"],
+input[type="checkbox"] {
+	cursor: pointer;
 }
 
-input:not([type='checkbox']):not([type='radio']),
+input:not([type="checkbox"]):not([type="radio"]),
 select {
-  display: block;
+	display: block;
 }
 
-input, select, button, textarea {
-  color: #000000;
-  background-color: #efefef;
-  font-family: inherit;
-  font-size: inherit;
-  margin-right: 6px;
-  margin-bottom: 6px;
-  padding: 5px 10px;
-  border: 1.25px solid rgba(0,0,0,.25);
-  border-radius: 6px;
-  outline: none;
+input,
+select,
+button,
+textarea {
+	color: #000000;
+	background-color: var(--background-lightest);
+	font-family: inherit;
+	font-size: inherit;
+	margin: 0;
+	padding: 5px 10px;
+	border: var(--border-size) solid var(--border);
+	border-radius: var(--border-radius);
+	outline: none;
 }
 
+input:hover,
+select:hover,
+button:hover,
+textarea:hover,
+input:focus-visible,
+select:focus-visible,
+button:focus-visible,
+textarea:focus-visible {
+	background-color: var(--background-secondary);
+}
 
-input:not([type='checkbox']):not([type='radio']),
-select, button, textarea {
-  -webkit-appearance: none;
+label:has(+ [required])::after {
+	content: "*";
+  color: var(--danger);
 }
 
 textarea {
-  margin-right: 0;
-  width: 100%;
-  box-sizing: border-box;
-  resize: vertical;
+	margin-right: 0;
+	width: 100%;
+	box-sizing: border-box;
+	resize: vertical;
 }
 
-button, input[type='submit'], input[type='button'] {
-  padding-right: 30px;
-  padding-left: 30px;
-}
-input[type='submit']:hover,
-input[type='button']:hover {
-  background: #dddddd;
+input[type="submit"]:hover,
+input[type="button"]:hover {
+	background: #dddddd;
 }
 
 button {
-    background-color: rgb(77 150 205);
-    color: #ffffff;
+	background-color: rgb(77 150 205);
+	color: #ffffff;
 }
 
 button:hover {
-    background-color: rgb(64, 131, 182);
-    color: #ffffff;
+	background-color: rgb(64, 131, 182);
+	color: #ffffff;
 }
-
 
 input:focus,
 select:focus,
 button:focus,
 textarea:focus {
-  box-shadow: 0 0 0 2px #0096bfab;
-}
-
-input[type='checkbox']:active,
-input[type='radio']:active,
-input[type='submit']:active,
-input[type='button']:active,
-button:active {
-  transform: translateY(2px);
+	box-shadow: 0 0 0 2px #0096bfab;
 }
 
 input:disabled,
 select:disabled,
 button:disabled,
 textarea:disabled {
-  cursor: not-allowed;
-  opacity: .5;
+	cursor: not-allowed;
+	opacity: 0.5;
 }
 
 ::-webkit-input-placeholder {
-  color: #949494;
+	color: #949494;
 }
 
 :-ms-input-placeholder {
-  color: #949494;
+	color: #949494;
 }
 
 ::-ms-input-placeholder {
-  color: #949494;
+	color: #949494;
 }
 
 ::placeholder {
-  color: #949494;
+	color: #949494;
 }
 
 a {
-  text-decoration: none;
-  color: #0076d1;
+	text-decoration: none;
+	color: #0076d1;
 }
 
 a:hover {
-  text-decoration: underline;
+	text-decoration: underline;
 }
 
-code, kbd {
-  background: #efefef;
-  color: #000000;
-  padding: 5px;
-  border-radius: 6px;
+code,
+kbd {
+	background: var(--background-secondary);
+	color: #000000;
+	padding: 5px;
+	border-radius: 6px;
 }
 
 pre > code {
-  padding: 10px;
-  display: block;
-  overflow-x: auto;
+	padding: 10px;
+	display: block;
+	overflow-x: auto;
 }
 
 img {
-  max-width: 100%;
+	max-width: 100%;
 }
 
 hr {
-  border: none;
-  border-top: 1px solid #dbdbdb;
+	border: none;
+	border-top: 1px solid #dbdbdb;
 }
 
 table {
-  border-collapse: collapse;
-  margin-bottom: 10px;
-  width: 100%;
+	border-collapse: collapse;
+	margin-bottom: 10px;
+	width: 100%;
 }
 
-td, th {
-  padding: 6px;
-  text-align: left;
+td,
+th {
+	padding: 6px;
+	text-align: left;
 }
 
 th {
-  border-bottom: 1px solid #dbdbdb;
+	border-bottom: 1px solid #dbdbdb;
 }
 
 tbody tr:nth-child(even) {
-  background-color: #efefef;
+	background-color: var(--background-secondary);
 }

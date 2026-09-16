@@ -191,14 +191,168 @@ abstract class SkyeSearchPicker<TResult extends { id: string }> extends SkyeValu
   }
 }
 
-/** Real peoplePicker: searches the directory (via graph.searchPeople, dispatched as a "skye-people-search" event) as the user types. */
-class SkyePeoplePicker extends SkyeSearchPicker<PersonResult> {
-  protected requestSearch(query: string): void {
-    this.dispatchEvent(new CustomEvent("skye-people-search", { detail: { query }, bubbles: true, composed: true }));
+/**
+ * Real peoplePicker: a token/chip multi-picker. Each chosen person is a
+ * discrete, removable unit — there is no delimiter the user ever sees or
+ * types, and a half-typed name can't end up "in" the value. Searches the
+ * directory as the user types (via the "skye-people-search" event, wired
+ * to graph.searchPeople in page-scripts/form.ts) and shows results in a
+ * dropdown; clicking one adds a chip.
+ *
+ * `.value` is a `string[]` of stable keys — each person's email when known,
+ * else their directory id — which is what the submit pipeline resolves to
+ * a SharePoint user id for a Person column (see submit/encodeSharePointFields.ts).
+ * `set value` also accepts a single string, or an array of SharePoint
+ * person objects (as they come back on an existing item), and normalises
+ * them, so an edit-mode prefill of a Person column still shows chips.
+ */
+interface PickedPerson {
+  key: string;
+  label: string;
+}
+
+class SkyePeoplePicker extends SkyeValueElement {
+  private box?: HTMLDivElement;
+  private input?: HTMLInputElement;
+  private dropdown?: HTMLUListElement;
+  private picked: PickedPerson[] = [];
+  private results: PersonResult[] = [];
+
+  connectedCallback() {
+    this.classList.add("skye-token-picker");
+    this.picked = normalisePeopleValue(this._value);
+
+    this.box = document.createElement("div");
+    this.box.className = "skye-token-picker__box";
+
+    this.input = document.createElement("input");
+    this.input.className = "skye-token-picker__input";
+    this.input.type = "text";
+    this.input.setAttribute("autocomplete", "off");
+    this.input.placeholder = this.getAttribute("placeholder") ?? "Type a name or email…";
+
+    this.dropdown = document.createElement("ul");
+    this.dropdown.className = "skye-token-picker__dropdown";
+    this.dropdown.hidden = true;
+
+    const debouncedSearch = debounce((q: string) => {
+      this.dispatchEvent(new CustomEvent("skye-people-search", { detail: { query: q }, bubbles: true, composed: true }));
+    }, 250);
+
+    this.input.addEventListener("input", () => {
+      const q = this.input!.value.trim();
+      if (q.length === 0) {
+        this.setResults([]);
+        return;
+      }
+      debouncedSearch(q);
+    });
+
+    // Backspace on an empty input removes the last chip — a standard token-field affordance.
+    this.input.addEventListener("keydown", (e) => {
+      if (e.key === "Backspace" && this.input!.value === "" && this.picked.length > 0) {
+        this.picked = this.picked.slice(0, -1);
+        this.commit();
+      }
+    });
+
+    this.input.addEventListener("blur", () => {
+      setTimeout(() => {
+        if (this.dropdown) this.dropdown.hidden = true;
+      }, 150);
+    });
+
+    this.box.appendChild(this.input);
+    this.appendChild(this.box);
+    this.appendChild(this.dropdown);
+    this.render();
   }
-  protected resultLabel(result: PersonResult): string {
-    return result.email ? `${result.displayName} (${result.email})` : result.displayName;
+
+  /** Called by page-scripts/form.ts's "skye-people-search" listener once Graph results come back. */
+  setResults(results: PersonResult[]): void {
+    this.results = results;
+    if (!this.dropdown) return;
+    this.dropdown.innerHTML = "";
+    const already = new Set(this.picked.map((p) => p.key));
+    const fresh = results.filter((r) => !already.has(r.email || r.id));
+    this.dropdown.hidden = fresh.length === 0;
+
+    for (const result of fresh) {
+      const li = document.createElement("li");
+      li.textContent = result.email ? `${result.displayName} (${result.email})` : result.displayName;
+      li.tabIndex = 0;
+      li.addEventListener("mousedown", (e) => {
+        e.preventDefault(); // keep focus so the input's blur-hide doesn't race this selection
+        this.add({ key: result.email || result.id, label: result.displayName || result.email || result.id });
+      });
+      this.dropdown!.appendChild(li);
+    }
   }
+
+  private add(person: PickedPerson): void {
+    if (!this.picked.some((p) => p.key === person.key)) this.picked = [...this.picked, person];
+    if (this.input) this.input.value = "";
+    if (this.dropdown) this.dropdown.hidden = true;
+    this.commit();
+  }
+
+  private removeChip(key: string): void {
+    this.picked = this.picked.filter((p) => p.key !== key);
+    this.commit();
+  }
+
+  /** Push the current selection into `_value` (a plain string[] of keys) and notify. */
+  private commit(): void {
+    this._value = this.picked.map((p) => p.key);
+    this.render();
+    this.emitChange();
+  }
+
+  protected render(): void {
+    if (!this.box || !this.input) return;
+    // Re-sync from an externally-set value (edit-mode prefill / setFieldValue).
+    if (!arraysShallowEqual(this.picked.map((p) => p.key), Array.isArray(this._value) ? (this._value as string[]) : [])) {
+      this.picked = normalisePeopleValue(this._value);
+    }
+    for (const chip of Array.from(this.box.querySelectorAll(".skye-token"))) chip.remove();
+    for (const person of this.picked) {
+      const chip = document.createElement("span");
+      chip.className = "skye-token";
+      chip.append(person.label);
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "skye-token__remove";
+      x.setAttribute("aria-label", `Remove ${person.label}`);
+      x.textContent = "×";
+      x.addEventListener("click", () => this.removeChip(person.key));
+      chip.appendChild(x);
+      this.box.insertBefore(chip, this.input);
+    }
+  }
+}
+
+/** Normalises whatever got assigned to a people picker's `value` into `{key,label}` chips: a string[], a single string, or SharePoint person objects from an existing item. */
+function normalisePeopleValue(value: unknown): PickedPerson[] {
+  const list = Array.isArray(value) ? value : value === undefined || value === null || value === "" ? [] : [value];
+  return list
+    .map((entry): PickedPerson | undefined => {
+      if (typeof entry === "string") return { key: entry, label: entry };
+      if (entry && typeof entry === "object") {
+        const o = entry as Record<string, unknown>;
+        // Key priority puts the numeric `LookupId` ahead of the display name: an edit-mode person
+        // seed often has no email, and the submit encoder short-circuits a numeric key straight to
+        // an already-resolved site user id — a display-name key would fail to re-resolve on save.
+        const key = String(o.Email ?? o.email ?? o.LookupId ?? o.id ?? o.LookupValue ?? "");
+        const label = String(o.LookupValue ?? o.displayName ?? o.Email ?? o.email ?? key);
+        return key ? { key, label } : undefined;
+      }
+      return undefined;
+    })
+    .filter((p): p is PickedPerson => p !== undefined);
+}
+
+function arraysShallowEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
 /**
@@ -304,7 +458,7 @@ class SkyeLookupTable extends SkyeValueElement {
       const actionsCell = document.createElement("td");
       const removeButton = document.createElement("button");
       removeButton.type = "button";
-      removeButton.textContent = "Remove";
+      removeButton.textContent = "×";
       removeButton.addEventListener("click", () => {
         if (this.tableConfig?.allowDelete === false) return;
         if (row.id) {
@@ -380,6 +534,135 @@ class SkyeRichtext extends SkyeValueElement {
   }
 }
 
+/**
+ * `checkboxGroup` controlType: a single dropdown that opens a checkable
+ * list, instead of a always-expanded vertical column of checkboxes. Pick
+ * as many options as you like; the trigger summarises the selection.
+ *
+ * `.options` (a `{ value, label? }[]`) is set by fieldRegistry.ts's
+ * `configureElement` hook right after creation — it comes from the field's
+ * own `options`, which page-scripts/form.ts fills from the bound SharePoint
+ * Choice column before render. `.value` is a `string[]`; `set value` also
+ * accepts a single string or a "; "/","-joined string and splits it.
+ */
+class SkyeMultiSelect extends SkyeValueElement {
+  options: Array<{ value: unknown; label?: string }> = [];
+  private trigger?: HTMLButtonElement;
+  private panel?: HTMLUListElement;
+  private open = false;
+
+  connectedCallback() {
+    this.classList.add("skye-multi-select");
+
+    this.trigger = document.createElement("button");
+    this.trigger.type = "button";
+    this.trigger.className = "skye-multi-select__trigger";
+    this.trigger.setAttribute("aria-haspopup", "listbox");
+    this.trigger.setAttribute("aria-expanded", "false");
+    this.trigger.addEventListener("click", () => this.toggle());
+
+    this.panel = document.createElement("ul");
+    this.panel.className = "skye-multi-select__panel";
+    this.panel.setAttribute("role", "listbox");
+    this.panel.setAttribute("aria-multiselectable", "true");
+    this.panel.hidden = true;
+
+    // Clicking away closes the panel.
+    document.addEventListener("click", (e) => {
+      if (this.open && !this.contains(e.target as Node)) this.setOpen(false);
+    });
+
+    this.appendChild(this.trigger);
+    this.appendChild(this.panel);
+    this.render();
+  }
+
+  private get selected(): string[] {
+    return Array.isArray(this._value) ? (this._value as string[]).map(String) : [];
+  }
+
+  set value(v: unknown) {
+    // Accept an array, or a single/joined string (e.g. an edit-mode prefill of a multi-choice column).
+    this._value = Array.isArray(v)
+      ? v.map(String)
+      : v === undefined || v === null || v === ""
+        ? []
+        : String(v)
+            .split(/\s*[;,]\s*/)
+            .filter(Boolean);
+    this.render();
+  }
+  get value(): unknown {
+    return this._value;
+  }
+
+  private toggle(): void {
+    this.setOpen(!this.open);
+  }
+
+  private setOpen(open: boolean): void {
+    this.open = open;
+    if (this.panel) this.panel.hidden = !open;
+    this.trigger?.setAttribute("aria-expanded", String(open));
+  }
+
+  private toggleOption(value: string, checked: boolean): void {
+    const next = new Set(this.selected);
+    if (checked) next.add(value);
+    else next.delete(value);
+    this._value = [...next];
+    this.render();
+    this.emitChange();
+  }
+
+  protected render(): void {
+    if (!this.trigger || !this.panel) return;
+    const selected = this.selected;
+
+    // Trigger label: summarise the current selection.
+    this.trigger.textContent = "";
+    const text = document.createElement("span");
+    if (selected.length === 0) {
+      text.className = "skye-multi-select__placeholder";
+      text.textContent = "Select options…";
+    } else {
+      const labelFor = (v: string) => String(this.options.find((o) => String(o.value) === v)?.label ?? v);
+      text.textContent = selected.length <= 3 ? selected.map(labelFor).join(", ") : `${selected.length} selected`;
+    }
+    const caret = document.createElement("span");
+    caret.className = "skye-multi-select__caret";
+    caret.textContent = "▾";
+    this.trigger.append(text, caret);
+
+    // Options list.
+    this.panel.innerHTML = "";
+    for (const opt of this.options) {
+      const value = String(opt.value);
+      const li = document.createElement("li");
+      li.className = "skye-multi-select__option";
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", String(selected.includes(value)));
+
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = selected.includes(value);
+      cb.addEventListener("change", () => this.toggleOption(value, cb.checked));
+
+      const span = document.createElement("span");
+      span.textContent = opt.label ?? value;
+
+      li.append(cb, span);
+      li.addEventListener("click", (e) => {
+        if (e.target !== cb) {
+          cb.checked = !cb.checked;
+          this.toggleOption(value, cb.checked);
+        }
+      });
+      this.panel.appendChild(li);
+    }
+  }
+}
+
 /** Read-only display for `calculatedDisplay` fields — value is set externally by renderForm's reactive recomputation whenever a dependency field changes (see renderForm.ts). */
 class SkyeCalculatedDisplay extends SkyeValueElement {
   connectedCallback() {
@@ -398,6 +681,7 @@ export function registerElements(): void {
   registered = true;
   customElements.define("skye-richtext", SkyeRichtext);
   customElements.define("skye-people-picker", SkyePeoplePicker);
+  customElements.define("skye-multi-select", SkyeMultiSelect);
   customElements.define("skye-lookup-picker", SkyeLookupPicker);
   customElements.define("skye-lookup-table", SkyeLookupTable);
   customElements.define("skye-calculated-display", SkyeCalculatedDisplay);

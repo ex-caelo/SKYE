@@ -95,16 +95,23 @@ export function populateFormOrViewPicker(
     button.addEventListener("click", () => onSelect(entry));
   });
 
+  if (onCreateNew) wireCreateNewFormConfig(section, onCreateNew);
+}
+
+/**
+ * Reveals + wires the "Create New Form Config" link on the form/view
+ * picker. Split out so the caller can render the picker immediately and
+ * flip this on later, once the (write-probe-backed) "can this user build?"
+ * check resolves in the background — instead of blocking the whole screen
+ * on it.
+ */
+export function wireCreateNewFormConfig(section: HTMLElement, onCreateNew: () => void): void {
   const create = section.querySelector<HTMLElement>('[data-el="create"]')!;
-  if (onCreateNew) {
-    create.hidden = false;
-    create.addEventListener("click", (e) => {
-      e.preventDefault();
-      onCreateNew();
-    });
-  } else {
-    create.hidden = true;
-  }
+  create.hidden = false;
+  create.addEventListener("click", (e) => {
+    e.preventDefault();
+    onCreateNew();
+  });
 }
 
 // --- add-site panel ---------------------------------------------------------

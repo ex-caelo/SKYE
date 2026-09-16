@@ -2,6 +2,7 @@ import { createGraphClient } from "../shared/sharepoint/createGraphClient.js";
 import {
   populateSitePicker,
   populateFormOrViewPicker,
+  wireCreateNewFormConfig,
   wireAddSitePanel,
   fillPermissionsStep,
   wireCreateSiteAssetsStep,
@@ -203,21 +204,43 @@ async function main() {
   }
 
   // --- site known, nothing specific requested: honor `home`, else pick a form/view ---
-  let siteConfig;
-  let canBuild = false;
-  try {
-    const configFiles = await graph.getSkyeSiteConfigFiles(siteId);
-    siteConfig = resolveSiteConfig(configFiles);
-    // Gates the "Create New Form Config" button — shown when the user can actually write into
-    // skye_data (so a Save would succeed), or is named in builderEditors. Same rule /builder's gate uses.
-    canBuild = (await graph.canWriteSkyeData(siteId)) || canEditFormConfigs(configFiles);
-  } catch (err) {
-    if (err instanceof SkyeNotConfiguredError) {
+  // The three reads the picker needs — the site config, the form list, the view list — don't
+  // depend on each other, so fire them together instead of config-then-lists. (`home` short-
+  // circuits to a redirect, in which case the two list reads were spent for nothing — a rare
+  // path, worth it to shave a round-trip off the common one.) getSkyeSiteConfigFiles /
+  // listSkyeForms / listSkyeViews all resolve the same Site Assets drive id, which is cached,
+  // so concurrent callers share one lookup.
+  // On a site with no skye_data at all, the list calls throw SkyeNotConfiguredError too — that
+  // case is owned by the config result below, so swallow only that error from the lists (any
+  // other list failure still bubbles, same as before).
+  const listUnlessUnconfigured = <T>(p: Promise<T[]>): Promise<T[]> =>
+    p.catch((err) => {
+      if (err instanceof SkyeNotConfiguredError) return [];
+      throw err;
+    });
+  const [configResult, forms, views] = await Promise.all([
+    graph.getSkyeSiteConfigFiles(siteId).then(
+      (files) => ({ ok: true as const, files }),
+      (err) => ({ ok: false as const, err })
+    ),
+    listUnlessUnconfigured(graph.listSkyeForms(siteId)),
+    listUnlessUnconfigured(graph.listSkyeViews(siteId)),
+  ]);
+
+  if (!configResult.ok) {
+    if (configResult.err instanceof SkyeNotConfiguredError) {
       showState(appRoot, "state-not-set-up");
       return;
     }
-    throw err;
+    throw configResult.err;
   }
+  const siteConfig = resolveSiteConfig(configResult.files);
+  // Gates the "Create New Form Config" button: the user is in `builderEditors` (cheap, from the
+  // config in hand) OR can write into skye_data (a write probe — see canWriteSkyeData). Resolved
+  // in the BACKGROUND so the picker isn't blocked on the probe; the button flips on later if true.
+  const canBuildPromise: Promise<boolean> = canEditFormConfigs(configResult.files)
+    ? Promise.resolve(true)
+    : graph.canWriteSkyeData(siteId).catch(() => false);
 
   if (siteConfig.home) {
     window.location.assign(
@@ -228,19 +251,18 @@ async function main() {
     return;
   }
 
-  const [forms, views] = await Promise.all([graph.listSkyeForms(siteId), graph.listSkyeViews(siteId)]);
-  populateFormOrViewPicker(
-    showState(appRoot, "step-form-or-view-picker"),
-    toPickerEntries(forms, views),
-    (entry) => {
-      window.location.assign(
-        entry.kind === "view"
-          ? buildViewUrl(siteId, applicationId, tenantId, entry.id)
-          : buildFormUrlForSelectedForm(siteId, applicationId, tenantId, entry.id)
-      );
-    },
-    canBuild ? () => window.location.assign(buildBuilderUrl(siteId, applicationId, tenantId)) : undefined
-  );
+  const pickerSection = showState(appRoot, "step-form-or-view-picker");
+  populateFormOrViewPicker(pickerSection, toPickerEntries(forms, views), (entry) => {
+    window.location.assign(
+      entry.kind === "view"
+        ? buildViewUrl(siteId, applicationId, tenantId, entry.id)
+        : buildFormUrlForSelectedForm(siteId, applicationId, tenantId, entry.id)
+    );
+  });
+  // Reveal the "Create New Form Config" link once the background build-permission check resolves.
+  canBuildPromise.then((canBuild) => {
+    if (canBuild) wireCreateNewFormConfig(pickerSection, () => window.location.assign(buildBuilderUrl(siteId, applicationId, tenantId)));
+  });
 }
 
 main().catch((err) => {

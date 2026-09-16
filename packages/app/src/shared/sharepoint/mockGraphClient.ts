@@ -373,6 +373,19 @@ export class MockGraphClient implements GraphClient {
     return delay(results.slice(0, 10));
   }
 
+  async resolveSiteUserId(_siteId: string, identifier: string): Promise<number | null> {
+    // Deterministic stand-in for the real User Information List lookup: match the people fixture
+    // by email or id and derive a stable number from the "person-N" id; anyone else -> a fixed id.
+    const needle = identifier.trim().toLowerCase();
+    // A numeric identifier is an already-resolved User Information List id (edit-mode seed) — pass it through.
+    if (/^\d+$/.test(needle)) return delay(Number(needle));
+    const person = (peopleFixture as PersonResult[]).find(
+      (p) => p.email?.toLowerCase() === needle || p.id.toLowerCase() === needle
+    );
+    if (person) return delay(Number(person.id.replace(/\D/g, "")) || 1);
+    return delay(identifier.includes("@") ? 99 : null);
+  }
+
   async searchLookupItems(siteId: string, listId: string, displayField: string, query: string): Promise<LookupItemResult[]> {
     const needle = query.trim().toLowerCase();
     const items = [...getStore(siteId, listId).values()];

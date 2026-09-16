@@ -27,6 +27,16 @@ export interface RenderedForm {
    * entry-form.ts.
    */
   validateAll: () => boolean;
+  /**
+   * Merges externally-computed, field-keyed error messages on top of the
+   * normal validation (they win, and are shown regardless of "touched"),
+   * marks those fields invalid, and re-renders. Pass `{}` to clear. Used
+   * for checks the DOM layer can't do itself — e.g. "this picked person
+   * isn't a member of the site" (see submit/checkPersonFields.ts), which
+   * must block the submit with a field warning rather than silently
+   * dropping the value. Any subsequent field edit clears them.
+   */
+  setExternalErrors: (errors: Record<string, string>) => void;
 }
 
 export interface RenderFormOptions {
@@ -41,18 +51,49 @@ export interface RenderFormOptions {
    * validateFormValues.ts's own default.
    */
   customValidators?: Record<string, CustomValidatorFn>;
+  /**
+   * Seed values for an edit- or view-mode form — the existing list item's
+   * fields, mapped by `mapSharePointFieldsToValues`. Applied after each
+   * field renders, overriding any `defaultValue`, and written onto the
+   * controls so people pickers / multi-selects show the saved data.
+   */
+  initialValues?: FieldValues;
 }
 
 /** Reads a control's current value using the accessor its field registry entry declares. */
 function readControlValue(control: HTMLElement, valueAccessor: "value" | "checked" | "none"): unknown {
   if (valueAccessor === "checked") return (control as HTMLInputElement).checked;
-  if (valueAccessor === "value") return (control as HTMLInputElement | HTMLSelectElement).value;
+  if (valueAccessor === "value") {
+    // A `radio` control is a <fieldset> of <input type=radio> — its own `.value` is meaningless;
+    // the field's value is whichever radio is currently checked (undefined if none yet).
+    if (control instanceof HTMLFieldSetElement) {
+      const checked = control.querySelector<HTMLInputElement>("input:checked");
+      return checked ? checked.value : undefined;
+    }
+    return (control as HTMLInputElement | HTMLSelectElement).value;
+  }
   return undefined;
 }
 
 function writeControlValue(control: HTMLElement, valueAccessor: "value" | "checked" | "none", value: unknown): void {
-  if (valueAccessor === "checked") (control as HTMLInputElement).checked = Boolean(value);
-  else if (valueAccessor === "value") (control as HTMLInputElement | HTMLSelectElement).value = value === undefined || value === null ? "" : String(value);
+  if (valueAccessor === "checked") {
+    (control as HTMLInputElement).checked = Boolean(value);
+  } else if (valueAccessor === "value") {
+    if (control instanceof HTMLFieldSetElement) {
+      for (const input of Array.from(control.querySelectorAll<HTMLInputElement>("input"))) {
+        input.checked = input.value === String(value);
+      }
+      return;
+    }
+    // Custom elements (skye-people-picker / skye-multi-select) accept a non-string value through
+    // their own `value` setter — only stringify for plain native inputs/selects.
+    const isCustomElement = control.tagName.includes("-");
+    (control as unknown as { value: unknown }).value = isCustomElement
+      ? value
+      : value === undefined || value === null
+        ? ""
+        : String(value);
+  }
 }
 
 /**
@@ -72,6 +113,8 @@ export function renderForm(config: FormConfig, document: Document, options: Rend
   // the instant the page loads. The underlying validation itself (validateFormValues) always runs
   // in full every time; this set only gates what's actually DISPLAYED. See validateAll/updateValidationDisplay.
   const touchedFields = new Set<string>();
+  /** Field-keyed errors set by the caller (setExternalErrors) — e.g. a picked person who isn't a site member. Cleared on the next field edit. */
+  const externalErrors = new Map<string, string>();
 
   const root = document.createElement("div");
   root.className = "skye-form";
@@ -153,6 +196,9 @@ export function renderForm(config: FormConfig, document: Document, options: Rend
         }
         recomputeVisibility();
         recomputeCalculatedFields();
+        // An edit invalidates any external error (they're re-checked on the next submit anyway) —
+        // so a "not a site member" warning clears the moment the user removes/changes that pick.
+        if (externalErrors.size > 0) externalErrors.clear();
         // Only actually re-renders this field's message if it's already touched — an untouched
         // field typing its very first character doesn't suddenly flash an error (see
         // updateValidationDisplay's own docstring), but a field the user has already blurred once
@@ -232,7 +278,9 @@ export function renderForm(config: FormConfig, document: Document, options: Rend
     const errorByField = new Map(errors.map((e) => [e.fieldKey, e.message]));
 
     for (const [fieldKey, { rendered }] of renderedFields) {
-      const message = touchedFields.has(fieldKey) ? errorByField.get(fieldKey) : undefined;
+      // An external error (e.g. "not a site member") always shows and always wins; otherwise fall
+      // back to the normal validation message, shown only once the field has been touched.
+      const message = externalErrors.get(fieldKey) ?? (touchedFields.has(fieldKey) ? errorByField.get(fieldKey) : undefined);
       rendered.messageEl.textContent = message ?? "";
       rendered.container.classList.toggle("skye-field--invalid", Boolean(message));
       rendered.control.setAttribute("aria-invalid", message ? "true" : "false");
@@ -240,9 +288,44 @@ export function renderForm(config: FormConfig, document: Document, options: Rend
         (rendered.control as HTMLInputElement).setCustomValidity(message ?? "");
       }
     }
+
+    // Flag each tab whose page currently has a shown error, so a problem on a page you're not
+    // looking at is still visible (paired with showPage touching a page's fields when you leave it).
+    for (const [pageKey, tab] of tabButtons) {
+      let hasError = false;
+      for (const [fieldKey, entry] of renderedFields) {
+        if (entry.field.page !== pageKey) continue;
+        if (externalErrors.has(fieldKey) || (touchedFields.has(fieldKey) && errorByField.has(fieldKey))) {
+          hasError = true;
+          break;
+        }
+      }
+      tab.classList.toggle("skye-form__tab--error", hasError);
+    }
+  }
+
+  /** Jumps to the page of the first field currently showing an error and scrolls it into view. Called on a failed submit / external-error set so the user isn't left on a page that looks fine. */
+  function focusFirstError(): void {
+    const errorByField = new Map(validateFormValues(config, values, options.customValidators ?? {}).map((e) => [e.fieldKey, e.message]));
+    for (const [fieldKey, entry] of renderedFields) {
+      const shown = externalErrors.has(fieldKey) || (touchedFields.has(fieldKey) && errorByField.has(fieldKey));
+      if (!shown) continue;
+      if (entry.field.page && entry.field.page !== activePageKey) showPage(entry.field.page);
+      entry.rendered.container.scrollIntoView?.({ block: "center" }); // not implemented in jsdom
+      return;
+    }
   }
 
   function showPage(activeKey: string): void {
+    // Leaving a page: touch its fields and re-render validation now, so a problem shows the moment
+    // you navigate away — not only when you finally reach Submit. (No-op on the initial render,
+    // where activePageKey is still undefined.)
+    if (activePageKey && activePageKey !== activeKey) {
+      for (const [fieldKey, entry] of renderedFields) {
+        if (entry.field.page === activePageKey) touchedFields.add(fieldKey);
+      }
+      updateValidationDisplay();
+    }
     activePageKey = activeKey;
     for (const [pageKey, container] of pageContainers) {
       container.style.display = pageKey === activeKey ? "grid" : "none";
@@ -255,6 +338,17 @@ export function renderForm(config: FormConfig, document: Document, options: Rend
   submitButton.className = "skye-form__submit";
   submitButton.textContent = "Submit";
   root.appendChild(submitButton);
+
+  // Edit / view mode: seed the existing item's values onto the form (overriding any defaultValue),
+  // and push them into the controls so people pickers and multi-selects render the saved data.
+  if (options.initialValues) {
+    for (const [fieldKey, value] of Object.entries(options.initialValues)) {
+      if (value === undefined) continue;
+      values[fieldKey] = value;
+      const entry = renderedFields.get(fieldKey);
+      if (entry) writeControlValue(entry.rendered.control, getControlDefinition(entry.field.controlType).valueAccessor, value);
+    }
+  }
 
   recomputeVisibility();
   recomputeCalculatedFields();
@@ -276,6 +370,7 @@ export function renderForm(config: FormConfig, document: Document, options: Rend
         const def = getControlDefinition(entry.field.controlType);
         writeControlValue(entry.rendered.control, def.valueAccessor, value);
       }
+      if (externalErrors.size > 0) externalErrors.clear(); // an edit invalidates any external error — re-checked at submit
       recomputeVisibility();
       recomputeCalculatedFields();
       updateValidationDisplay();
@@ -288,7 +383,18 @@ export function renderForm(config: FormConfig, document: Document, options: Rend
     validateAll: () => {
       for (const fieldKey of renderedFields.keys()) touchedFields.add(fieldKey);
       updateValidationDisplay();
-      return validateFormValues(config, values, options.customValidators ?? {}).length === 0;
+      const ok = validateFormValues(config, values, options.customValidators ?? {}).length === 0;
+      if (!ok) focusFirstError();
+      return ok;
+    },
+    setExternalErrors: (errs) => {
+      externalErrors.clear();
+      for (const [key, msg] of Object.entries(errs)) {
+        externalErrors.set(key, msg);
+        touchedFields.add(key);
+      }
+      updateValidationDisplay();
+      if (Object.keys(errs).length > 0) focusFirstError();
     },
   };
 }

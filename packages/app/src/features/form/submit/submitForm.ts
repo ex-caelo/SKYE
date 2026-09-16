@@ -1,9 +1,9 @@
 import type { FormConfig, FieldValues } from "@skye/form-config";
 import { runTriggerPhase, createDefaultHandlerRegistry, type TriggerPhaseResult } from "@skye/form-config";
-import type { GraphClient, GraphListItem } from "../../../shared/sharepoint/types.js";
+import type { GraphClient, GraphListItem, GraphListColumn } from "../../../shared/sharepoint/types.js";
 import { EtagConflictError } from "../../../shared/sharepoint/types.js";
 import type { RawGraphFetch } from "../../../shared/sharepoint/rawGraphFetch.js";
-import { mapValuesToSharePointFields } from "./mapValuesToSharePointFields.js";
+import { buildPrimarySharePointFields } from "./encodeSharePointFields.js";
 import { writeLookupTableRows, type LookupTableRow } from "./lookupTableRows.js";
 import { buildActionExecutionContext, type AppCallbacks } from "./buildActionContext.js";
 import { uploadFieldFile } from "./fileUpload.js";
@@ -20,6 +20,8 @@ export interface SubmitParams {
   graph: GraphClient;
   graphFetch: RawGraphFetch;
   callbacks: AppCallbacks;
+  /** The primary list's live columns (from getListColumns) — lets the submit pipeline encode Person / multi-choice values the way Graph expects. Omit and those fields fall back to a plain passthrough. */
+  listColumns?: GraphListColumn[];
 }
 
 export interface SubmitResult {
@@ -28,6 +30,8 @@ export interface SubmitResult {
   conflict?: boolean;
   /** Per-field-key error messages for any file upload that failed — the submission still proceeds without that file rather than aborting entirely. */
   fileUploadErrors?: Record<string, string>;
+  /** Per-field-key messages for values that couldn't be fully encoded for SharePoint (e.g. a picked person who isn't a site user) — the item is still saved, that field left blank. */
+  fieldErrors?: Record<string, string>;
   item?: { id: string; fields: Record<string, unknown> };
   beforeSubmit: TriggerPhaseResult;
   afterSubmit?: TriggerPhaseResult;
@@ -81,18 +85,30 @@ export async function submitForm(params: SubmitParams): Promise<SubmitResult> {
     const selected = values[fieldKey];
     if (!(selected instanceof File)) continue; // no new file chosen this submission
     try {
-      const uploaded = await uploadFieldFile(graph, siteId, field, selected);
+      const uploaded = await uploadFieldFile(graph, siteId, field, selected, values);
       values[fieldKey] = uploaded.webUrl;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // The user-facing status shows these verbatim, so keep it a plain sentence; the real error
+      // (Graph message, stack) goes to the console for whoever's debugging.
       console.error(`submitForm: file upload failed for field "${fieldKey}".`, err);
-      fileUploadErrors[fieldKey] = message;
-      delete values[fieldKey]; // don't let a raw File object reach mapValuesToSharePointFields
+      const label = field.label ?? fieldKey;
+      fileUploadErrors[fieldKey] = `"${label}" couldn't be uploaded — the rest was saved.`;
+      delete values[fieldKey]; // don't let a raw File object reach the SharePoint field encoder
     }
   }
 
   // --- primary item write ---
-  const sharepointFields = mapValuesToSharePointFields(config.fields, values);
+  // Encode values against the live column types so Person / multi-choice fields land in the shape
+  // Graph expects (LookupId, Collection(...)) — see encodeSharePointFields.ts. A person who can't be
+  // resolved to a site user is reported, not fatal.
+  const { fields: sharepointFields, errors: encodeErrors } = await buildPrimarySharePointFields(
+    graph,
+    siteId,
+    config.fields,
+    values,
+    params.listColumns ?? []
+  );
+  const fieldErrorsIfAny = Object.keys(encodeErrors).length > 0 ? encodeErrors : undefined;
   let item: GraphListItem;
   try {
     item =
@@ -103,7 +119,7 @@ export async function submitForm(params: SubmitParams): Promise<SubmitResult> {
     const isConflict = err instanceof EtagConflictError;
     console.error(isConflict ? "submitForm: etag conflict on primary item write." : "submitForm: primary item write failed.", err);
     const onError = await runPhase("onError", beforeSubmit.results, {});
-    return { success: false, conflict: isConflict, beforeSubmit, onError };
+    return { success: false, conflict: isConflict, fieldErrors: fieldErrorsIfAny, beforeSubmit, onError };
   }
 
   const itemForTemplates = { id: item.id, ...item.fields };
@@ -125,11 +141,11 @@ export async function submitForm(params: SubmitParams): Promise<SubmitResult> {
   const uploadErrorsIfAny = Object.keys(fileUploadErrors).length > 0 ? fileUploadErrors : undefined;
   if (Object.keys(afterSubmit.errors).length > 0) {
     const onError = await runPhase("onError", { ...beforeSubmit.results, ...afterSubmit.results }, itemForTemplates);
-    return { success: true, item: { id: item.id, fields: item.fields }, fileUploadErrors: uploadErrorsIfAny, beforeSubmit, afterSubmit, onError };
+    return { success: true, item: { id: item.id, fields: item.fields }, fileUploadErrors: uploadErrorsIfAny, fieldErrors: fieldErrorsIfAny, beforeSubmit, afterSubmit, onError };
   }
 
   // --- onSuccess ---
   const onSuccess = await runPhase("onSuccess", { ...beforeSubmit.results, ...afterSubmit.results }, itemForTemplates);
 
-  return { success: true, item: { id: item.id, fields: item.fields }, fileUploadErrors: uploadErrorsIfAny, beforeSubmit, afterSubmit, onSuccess };
+  return { success: true, item: { id: item.id, fields: item.fields }, fileUploadErrors: uploadErrorsIfAny, fieldErrors: fieldErrorsIfAny, beforeSubmit, afterSubmit, onSuccess };
 }

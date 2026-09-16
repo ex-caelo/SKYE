@@ -10,6 +10,12 @@ describe("validateField", () => {
     expect(result.failedConstraint).toBe("required");
   });
 
+  it("fails required on an empty array (multi-select / people picker with nothing chosen)", () => {
+    const field: FieldConfig = { controlType: "checkboxGroup", required: true };
+    expect(validateField(field, [], {}).failedConstraint).toBe("required");
+    expect(validateField(field, ["a"], {}).valid).toBe(true);
+  });
+
   it("uses a custom validationMessages override when present", () => {
     const field: FieldConfig = { controlType: "text", required: true, validationMessages: { required: "We need a name." } };
     expect(validateField(field, "", {}).message).toBe("We need a name.");

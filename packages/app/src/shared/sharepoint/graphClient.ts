@@ -101,13 +101,16 @@ function mapColumn(raw: Record<string, unknown>): GraphListColumn {
   const columnType = (["text", "note", "number", "currency", "boolean", "dateTime", "choice", "lookup", "personOrGroup", "hyperlinkOrPicture"] as const).find(
     (t) => t in raw
   );
+  const choiceFacet = raw.choice as { choices?: string[]; allowMultipleSelection?: boolean } | undefined;
+  const personFacet = raw.personOrGroup as { allowMultipleSelection?: boolean } | undefined;
   return {
     name: raw.name as string,
     displayName: (raw.displayName as string) ?? (raw.name as string),
     columnType: columnType ?? "text",
     required: raw.required as boolean | undefined,
     readOnly: raw.readOnly as boolean | undefined,
-    choices: (raw.choice as { choices?: string[] } | undefined)?.choices,
+    choices: choiceFacet?.choices,
+    allowMultiple: choiceFacet?.allowMultipleSelection ?? personFacet?.allowMultipleSelection ?? undefined,
   };
 }
 
@@ -295,6 +298,97 @@ export class RealGraphClient implements GraphClient {
   async searchLookupItems(siteId: string, listId: string, displayField: string, query: string): Promise<LookupItemResult[]> {
     const page = await this.searchListItems(siteId, listId, { search: query, top: 10, select: [displayField] });
     return page.items.map((item) => ({ id: item.id, label: String(item.fields[displayField] ?? item.id) }));
+  }
+
+  /** `${siteId}::${identifier.toLowerCase()}` -> resolved User Information List id (or null). Resolved once per person per session. */
+  private siteUserIdCache = new Map<string, Promise<number | null>>();
+
+  async resolveSiteUserId(siteId: string, identifier: string): Promise<number | null> {
+    // An edit-mode form seeds a person field with the already-resolved numeric User Information
+    // List id (from `<col>LookupId` on the loaded item). It's resolved by definition — don't
+    // re-scan it (which would fail, since the scan matches on email/UPN/claims, not the id).
+    const trimmed = identifier.trim();
+    if (/^\d+$/.test(trimmed)) return Number(trimmed);
+
+    const key = `${siteId}::${trimmed.toLowerCase()}`;
+    let cached = this.siteUserIdCache.get(key);
+    if (!cached) {
+      cached = this.doResolveSiteUserId(siteId, identifier).catch(() => null);
+      this.siteUserIdCache.set(key, cached);
+    }
+    return cached;
+  }
+
+  /**
+   * Looks the person up in the site's "User Information List" — a hidden
+   * system list every site has, whose item ids are exactly the values a
+   * `personOrGroup` column's `…LookupId` write expects.
+   *
+   * Matching is deliberately broad because the same person appears under
+   * inconsistent shapes across tenants: `EMail` is often blank (it's only
+   * filled once the user has actually visited SharePoint), `UserName` may
+   * be the UPN or the full claims string, and `Name` is the claims login
+   * (`i:0#.f|membership|<upn>`). We try a targeted `$filter` on each of
+   * those, then a paginated scan matching any of them (exact, or the claims
+   * string ending in `|<identifier>`, or same local-part + domain).
+   *
+   * Returns null when the person simply isn't a known user of this site
+   * yet — a Graph `LookupId` write can't "ensure" a brand-new user the way
+   * the SharePoint UI does, so the caller reports it and leaves that field
+   * blank rather than failing the whole submit.
+   */
+  private async doResolveSiteUserId(siteId: string, identifier: string): Promise<number | null> {
+    const id = identifier.trim();
+    const lc = id.toLowerCase();
+    const localPart = lc.includes("@") ? lc.slice(0, lc.indexOf("@")) : "";
+    const base = `/sites/${siteId}/lists/User Information List/items`;
+    const selectFields = "EMail,UserName,Name,Title";
+
+    // 1. Targeted server-side filter — fast when the field is queryable on this tenant.
+    const filterFields = id.includes("@") ? ["EMail", "UserName", "Name"] : ["UserName", "Name"];
+    for (const field of filterFields) {
+      try {
+        const res = await withRetry(() =>
+          this.client
+            .api(base)
+            .header("Prefer", "HonorNonIndexedQueriesWarningMayFailRandomly")
+            .filter(`fields/${field} eq '${id.replace(/'/g, "''")}'`)
+            .expand(`fields($select=${selectFields})`)
+            .top(1)
+            .get()
+        );
+        const hit = (res.value as Array<{ id?: string }> | undefined)?.[0];
+        if (hit?.id) return Number(hit.id);
+      } catch (err) {
+        if (![400, 404].includes((err as { statusCode?: number })?.statusCode ?? 0)) throw err;
+      }
+    }
+
+    // 2. Paginated scan with a broad local match (bounded — a site's user list is hundreds, not millions).
+    const matches = (f: Record<string, unknown>): boolean => {
+      const email = String(f.EMail ?? "").toLowerCase();
+      const uname = String(f.UserName ?? "").toLowerCase();
+      const name = String(f.Name ?? "").toLowerCase(); // "i:0#.f|membership|reecsmit@iu.edu"
+      if (email === lc || uname === lc || name === lc) return true;
+      if (name.endsWith(`|${lc}`) || uname.endsWith(`|${lc}`)) return true;
+      if (localPart && email.includes("@") && email.slice(0, email.indexOf("@")) === localPart && email.endsWith(lc.slice(lc.indexOf("@")))) return true;
+      return false;
+    };
+    // Bounded scan — a couple of pages only. If the targeted filters above found nothing, the
+    // person is very likely not a site user at all (in which case no amount of scanning helps),
+    // and this must not turn one submit into dozens of sequential Graph round-trips.
+    try {
+      let url: string = `${base}?$expand=fields($select=${selectFields})&$top=200`;
+      for (let page = 0; page < 3 && url; page++) {
+        const res = await withRetry(() => this.client.api(url).get());
+        const hit = (res.value as Array<{ id?: string; fields?: Record<string, unknown> }> | undefined)?.find((it) => matches(it.fields ?? {}));
+        if (hit?.id) return Number(hit.id);
+        url = (res["@odata.nextLink"] as string | undefined) ?? "";
+      }
+    } catch {
+      return null;
+    }
+    return null;
   }
 
   async deleteListItem(siteId: string, listId: string, itemId: string): Promise<void> {
@@ -544,7 +638,53 @@ export class RealGraphClient implements GraphClient {
    * network — resolves to `false`, since the callers are UI gates that
    * should hide the affordance when unsure rather than dead-end later.
    */
+  /** In-flight/settled canWriteSkyeData probes, deduped per site for this page's lifetime (sessionStorage persists the result across navigations). */
+  private canWriteCache = new Map<string, Promise<boolean>>();
+
+  /**
+   * Whether the signed-in user can write into this site's `skye_data`
+   * (gates the "Create/Edit in Builder" affordances). Graph exposes no
+   * read-only signal for effective folder permission, so this is a write
+   * probe — a PUT + DELETE of a marker file. That's two round-trips, so
+   * the result is cached in `sessionStorage` and only re-probed once per
+   * site per browser session. `installSkyeSiteConfig` clears the cache for
+   * the site it just set up.
+   */
   async canWriteSkyeData(siteId: string): Promise<boolean> {
+    const key = `skye:canWrite:${siteId}`;
+    try {
+      const stored = sessionStorage.getItem(key);
+      if (stored === "1") return true;
+      if (stored === "0") return false;
+    } catch {
+      // sessionStorage unavailable — fall through to a live probe (still deduped per page below).
+    }
+
+    let inflight = this.canWriteCache.get(siteId);
+    if (!inflight) {
+      inflight = this.probeCanWriteSkyeData(siteId).then((ok) => {
+        try {
+          sessionStorage.setItem(key, ok ? "1" : "0");
+        } catch {
+          // ignore
+        }
+        return ok;
+      });
+      this.canWriteCache.set(siteId, inflight);
+    }
+    return inflight;
+  }
+
+  private clearCanWriteCache(siteId: string): void {
+    this.canWriteCache.delete(siteId);
+    try {
+      sessionStorage.removeItem(`skye:canWrite:${siteId}`);
+    } catch {
+      // ignore
+    }
+  }
+
+  private async probeCanWriteSkyeData(siteId: string): Promise<boolean> {
     let probePath: string;
     try {
       // Plain name + extension (no leading dot) so a filename-validation 400 can't masquerade as "no access".
@@ -568,8 +708,10 @@ export class RealGraphClient implements GraphClient {
   async installSkyeSiteConfig(siteId: string): Promise<SkyeInstallResult> {
     // SKYE's data lives in the Site Assets library. If the site doesn't have one, we can't
     // create it (needs a `manage` grant) — the caller shows a "create it in SharePoint, then
-    // retry" step. Bust the cache first so a library the user just made is picked up.
+    // retry" step. Bust the caches first so a library the user just made is picked up, and so
+    // the "can this user build?" probe re-runs now that skye_data exists and is theirs.
     this.siteAssetsDriveCache.delete(siteId);
+    this.clearCanWriteCache(siteId);
     const driveId = await this.siteAssetsDriveId(siteId);
     if (!driveId) {
       throw new SkyeInstallError(
@@ -751,7 +893,11 @@ export class RealGraphClient implements GraphClient {
 
   async uploadToLibrary(siteId: string, driveId: string, folderPath: string | undefined, fileName: string, data: ArrayBuffer): Promise<UploadedFile> {
     const path = folderPath ? `${folderPath}/${fileName}` : fileName;
-    const res = await withRetry(() => this.client.api(`/sites/${siteId}/drives/${driveId}/root:/${path}:/content`).put(data));
+    // The Graph JS SDK's serializeContent() runs `Buffer.from()` on an ArrayBuffer OR TypedArray
+    // body — `Buffer` is a Node global, so that throws "Buffer is not defined" in the browser and
+    // breaks every library-mode file upload. A Blob is passed through untouched, so wrap it.
+    const body = data instanceof Blob ? data : new Blob([data]);
+    const res = await withRetry(() => this.client.api(`/sites/${siteId}/drives/${driveId}/root:/${path}:/content`).put(body));
     return { driveItemId: res.id as string, webUrl: res.webUrl as string };
   }
 }

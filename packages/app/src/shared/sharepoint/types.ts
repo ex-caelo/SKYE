@@ -14,6 +14,8 @@ export interface GraphListColumn {
   readOnly?: boolean;
   /** Populated for columnType "choice". */
   choices?: string[];
+  /** True for a multi-value "choice" or "personOrGroup" column (Graph's `allowMultipleSelection`) — the submit pipeline encodes these as a `Collection(...)` instead of a scalar. */
+  allowMultiple?: boolean;
 }
 
 export interface GraphListItem {
@@ -207,6 +209,14 @@ export interface GraphClient {
 
   /** Backs the peoplePicker control — searches the tenant directory by display name. */
   searchPeople(query: string): Promise<PersonResult[]>;
+  /**
+   * Resolves a person (by email, or a login name / directory id) to their
+   * numeric id in THIS site's hidden User Information List — the value a
+   * `personOrGroup` column write needs as its `…LookupId`. Returns null if
+   * the person can't be found on the site. Backs the submit pipeline's
+   * Person-column encoding (see submit/encodeSharePointFields.ts).
+   */
+  resolveSiteUserId(siteId: string, identifier: string): Promise<number | null>;
   /** Backs the lookupPicker control — searches a specific related list's items, using `displayField` as each result's label. */
   searchLookupItems(siteId: string, listId: string, displayField: string, query: string): Promise<LookupItemResult[]>;
 

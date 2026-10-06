@@ -15,6 +15,14 @@ body {
 	min-height: calc(100svh - 2rem);
 }
 
+/* view.css also sets `body` margin (it styles the sandboxed view frame too, so it can't be changed there).
+   `html body` outranks its plain `body` rule, so the top reserve for the fixed logo holds on every page. */
+@media (min-width: 701px) {
+	html body {
+		margin-top: 5rem;
+	}
+}
+
 #skye-app {
 	background: var(--background);
 	padding: 20px 30px;

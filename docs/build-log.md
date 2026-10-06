@@ -4020,3 +4020,16 @@ original element is genuinely gone, not just visually covered.
   §§60–62 (it is the pre-§39 revision). Six Luddy tests (`luddyApproveButton`,
   `luddyAdminDefaults`) fail for that reason. Not restored, since it was
   changed on disk after the earlier edits; confirm which version is intended.
+
+## 66. Logo clipping on the view page
+
+- The §59 fix raised the `body` top margin in `form.css`, but the view page
+  also imports `features/custom-views/view.css`, whose `body { margin: 1rem }`
+  has the same specificity and loads later, so it overrode the reserve.
+  Logo overlap came back on `/view`.
+- `view.css` can't just drop the rule, because it also styles the sandboxed
+  frame. Added to `form.css`: `@media (min-width: 701px) { html body { margin-top: 5rem } }`.
+  `html body` outranks the plain `body` rule. Every page loads `form.css`, so
+  this covers all of them.
+- Verified: build succeeds and the rule is in the emitted `form.css`. Not checked
+  in a browser; the Chrome extension was unavailable.

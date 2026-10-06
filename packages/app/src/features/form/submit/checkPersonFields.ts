@@ -1,10 +1,18 @@
 import type { FieldConfig, FieldValues } from "@skye/form-config";
 import type { GraphClient, GraphListColumn } from "../../../shared/sharepoint/types.js";
+import { personIdentifier } from "./personIdentifier.js";
 
-/** Scalar-or-array -> array of non-empty strings. */
+/**
+ * Scalar-or-array -> array of resolvable identifier strings. Uses
+ * `personIdentifier` (not a naive `String(entry)`) so an UNTOUCHED
+ * edit-mode person value — a raw SharePoint `{LookupId, LookupValue,
+ * Email}` object, or an array of them for a multi-value column — resolves
+ * correctly instead of stringifying to `"[object Object]"` and failing a
+ * real, already-valid site member.
+ */
 function toList(value: unknown): string[] {
   const list = Array.isArray(value) ? value : value === undefined || value === null || value === "" ? [] : [value];
-  return list.map(String).filter((s) => s.trim() !== "");
+  return list.map(personIdentifier).filter((s) => s.trim() !== "");
 }
 
 /**

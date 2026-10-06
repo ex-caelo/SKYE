@@ -2,6 +2,7 @@ import type { FieldConfig } from "@skye/form-config";
 import { getControlDefinition } from "./fieldRegistry.js";
 import { applyAttributes, applyStyle } from "./applyAttributes.js";
 import { humanizeFieldKey } from "./fieldLabels.js";
+import { wireFileDropZone } from "./fileUploadZone.js";
 
 export interface RenderedField {
   /** The wrapping element placed into the page's grid — this is what layoutEngine assigns a grid-area to. */
@@ -10,6 +11,20 @@ export interface RenderedField {
   control: HTMLElement;
   /** Where a validation message is shown — populated by the validation layer, not by renderField itself. */
   messageEl: HTMLElement;
+  /**
+   * Only present for `controlType: "file"` — the preview slot fileUploadZone.ts's
+   * `renderFilePreview` renders into. A file input's own value can't be seeded
+   * programmatically (browsers don't allow it), so renderForm.ts uses this directly to show an
+   * edit-mode field's already-saved value (a URL string, not a File) as a preview instead.
+   */
+  filePreviewEl?: HTMLElement;
+  /**
+   * Only present for `controlType: "button"` — an `<output>` renderForm.ts's button-click wiring
+   * (see runButtonActions.ts's caller in page-scripts/form.ts) writes this button's own
+   * success/error/progress messages into, kept separate from other fields' validation messages
+   * and the form's shared submit-status line so multiple buttons never stomp on each other.
+   */
+  buttonStatusEl?: HTMLElement;
 }
 
 /**
@@ -42,6 +57,32 @@ export function renderField(fieldKey: string, field: FieldConfig, document: Docu
     container.style.gridArea = fieldKey;
     container.appendChild(control);
     return { container, control, messageEl: document.createElement("span") };
+  }
+
+  // A button isn't a value-bearing input (no label-for/help-text/validation-message chrome it
+  // needs), but it isn't purely content-only either — it needs its own click-feedback slot
+  // (buttonStatusEl), which none of the controls above need. Its own text IS its label.
+  if (field.controlType === "button") {
+    control.id = fieldKey;
+    control.textContent = field.label ?? "";
+
+    const container = document.createElement("div");
+    container.className = "skye-field skye-field--button";
+    container.style.gridArea = fieldKey;
+    container.appendChild(control);
+
+    if (field.helpText) {
+      const help = document.createElement("div");
+      help.className = "skye-field__help";
+      help.textContent = field.helpText;
+      container.appendChild(help);
+    }
+
+    const buttonStatusEl = document.createElement("output");
+    buttonStatusEl.className = "skye-field__button-status";
+    container.appendChild(buttonStatusEl);
+
+    return { container, control, messageEl: document.createElement("span"), buttonStatusEl };
   }
 
   const container = document.createElement("div");
@@ -87,7 +128,27 @@ export function renderField(fieldKey: string, field: FieldConfig, document: Docu
     container.appendChild(subtitle);
   }
 
-  container.appendChild(control);
+  // Only set for controlType "file" — see RenderedField.filePreviewEl.
+  let filePreviewEl: HTMLElement | undefined;
+
+  if (field.controlType === "file") {
+    // A drag-and-drop zone wrapping the real input, plus a small preview (thumbnail for an
+    // image, filename/size otherwise) that appears once a file's picked — see fileUploadZone.ts.
+    // The input itself stays exactly what renderForm.ts already reads `.files?.[0]` from.
+    const dropZone = document.createElement("div");
+    dropZone.className = "skye-file-upload";
+    dropZone.appendChild(control);
+
+    filePreviewEl = document.createElement("div");
+    filePreviewEl.className = "skye-file-upload__preview";
+    filePreviewEl.hidden = true;
+    dropZone.appendChild(filePreviewEl);
+
+    container.appendChild(dropZone);
+    wireFileDropZone(dropZone, control as HTMLInputElement, filePreviewEl, document);
+  } else {
+    container.appendChild(control);
+  }
 
   if (field.helpText) {
     const help = document.createElement("div");
@@ -106,5 +167,5 @@ export function renderField(fieldKey: string, field: FieldConfig, document: Docu
   // needing to touch this attribute at all.
   control.setAttribute("aria-describedby", messageEl.id);
 
-  return { container, control, messageEl };
+  return { container, control, messageEl, filePreviewEl };
 }

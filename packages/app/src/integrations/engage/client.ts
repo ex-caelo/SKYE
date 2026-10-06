@@ -67,7 +67,8 @@ export async function engageFetch(
   baseUrl: string,
   apiKey: string | undefined,
   path: string,
-  init: Omit<RequestInit, "body"> & { body?: unknown } = {}
+  init: Omit<RequestInit, "body"> & { body?: unknown } = {},
+  organizationId?: number
 ): Promise<any> {
   const { body, headers, ...rest } = init;
   const response = await ctx.httpFetch(`${baseUrl.replace(/\/$/, "")}${path}`, {
@@ -75,6 +76,11 @@ export async function engageFetch(
     headers: {
       "Content-Type": "application/json",
       ...(apiKey ? { "X-Engage-Api-Key": apiKey } : {}),
+      // Only meaningful when baseUrl points at SKYE's own gated BeInvolved proxy (_server/) rather
+      // than the real Engage host directly — that proxy requires this header on every request and
+      // rejects anything missing it (see _server/src/gate.ts). Harmless to omit when calling
+      // Engage directly with a real apiKey, so this is opt-in, not required, at the type level.
+      ...(organizationId !== undefined ? { "X-Skye-Organization-Id": String(organizationId) } : {}),
       ...(headers as Record<string, string> | undefined),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,

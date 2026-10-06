@@ -82,6 +82,27 @@ describe("engage.createEvent", () => {
     expect(result).toEqual({ eventId: 42, name: "Kickoff", startsOn: "2026-09-01T14:00:00", endsOn: "2026-09-01T15:00:00" });
   });
 
+  it("passes through the response's accessCode (the attendance-scanner check-in code — confirmed present on Engage's real \"3.0-Event-PostPutResponse\" schema)", async () => {
+    const httpFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: 42, name: "Kickoff", startsOn: "2026-09-01T14:00:00", endsOn: "2026-09-01T15:00:00", accessCode: "AB12CD" }), { status: 200 })
+    );
+    const result = await createEvent(
+      [
+        {
+          submittedByOrganizationId: 7,
+          submittedById: { campusEmail: "a@iu.edu" },
+          name: "Kickoff",
+          description: "Fall kickoff event",
+          startsOn: "2026-09-01T14:00:00",
+          endsOn: "2026-09-01T15:00:00",
+          address: { name: "Union" },
+        },
+      ],
+      makeContext(httpFetch)
+    );
+    expect(result).toMatchObject({ accessCode: "AB12CD" });
+  });
+
   it("uses a whitelabeled baseUrl override instead of the default host", async () => {
     const httpFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1 }), { status: 200 }));
     await createEvent(
@@ -134,6 +155,43 @@ describe("engage.createEvent", () => {
   });
 });
 
+describe("organizationId -> X-Skye-Organization-Id header (for calling SKYE's own gated BeInvolved proxy, _server/)", () => {
+  it("is sent when organizationId is supplied", async () => {
+    const httpFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 42 }), { status: 200 }));
+    await createEvent(
+      [
+        {
+          organizationId: 388096,
+          submittedByOrganizationId: 388096,
+          submittedById: { campusEmail: "a@iu.edu" },
+          name: "Kickoff",
+          description: "d",
+          startsOn: "2026-09-01T14:00:00",
+          endsOn: "2026-09-01T15:00:00",
+          address: { name: "Union" },
+        },
+      ],
+      makeContext(httpFetch)
+    );
+    const [, init] = httpFetch.mock.calls[0];
+    expect((init.headers as Record<string, string>)["X-Skye-Organization-Id"]).toBe("388096");
+  });
+
+  it("is omitted entirely when organizationId isn't supplied — calling Engage directly needs no such header", async () => {
+    const httpFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "Canceled" }), { status: 200 }));
+    await cancelEvent([{ eventId: 42 }], makeContext(httpFetch));
+    const [, init] = httpFetch.mock.calls[0];
+    expect("X-Skye-Organization-Id" in (init.headers as Record<string, string>)).toBe(false);
+  });
+
+  it("works for an existing-event operation too (cancelEvent), not just creation", async () => {
+    const httpFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "Canceled" }), { status: 200 }));
+    await cancelEvent([{ eventId: 42, organizationId: 388096 }], makeContext(httpFetch));
+    const [, init] = httpFetch.mock.calls[0];
+    expect((init.headers as Record<string, string>)["X-Skye-Organization-Id"]).toBe("388096");
+  });
+});
+
 describe("engage.updateEvent", () => {
   it("PATCHes with JSON Patch ops: submittedById as 'add', changed fields as 'replace'", async () => {
     const httpFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 42, name: "New Name", startsOn: "2026-09-01T16:00:00", endsOn: "2026-09-01T17:00:00" }), { status: 200 }));
@@ -153,6 +211,19 @@ describe("engage.updateEvent", () => {
       { op: "replace", path: "/endsOn", value: "2026-09-01T17:00:00" },
     ]);
     expect(result).toEqual({ eventId: 42, name: "New Name", startsOn: "2026-09-01T16:00:00", endsOn: "2026-09-01T17:00:00" });
+  });
+
+  it("passes through the response's accessCode, same as engage.createEvent", async () => {
+    const httpFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 42, name: "New Name", accessCode: "ZZ99YY" }), { status: 200 }));
+    const result = await updateEvent([{ eventId: 42, submittedById: { campusEmail: "a@iu.edu" }, name: "New Name" }], makeContext(httpFetch));
+    expect(result).toMatchObject({ accessCode: "ZZ99YY" });
+  });
+
+  it("accepts eventId as a string (what a {{fields.x}} template placeholder always produces, even for a numeric field) without breaking the request URL", async () => {
+    const httpFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 42 }), { status: 200 }));
+    await updateEvent([{ eventId: "42" as unknown as number, submittedById: { campusEmail: "a@iu.edu" }, name: "New Name" }], makeContext(httpFetch));
+    const [url] = httpFetch.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_ENGAGE_BASE_URL}/v3.0/events/event/42`);
   });
 
   it("requires eventId and a non-empty submittedById, even when nothing else is changing", async () => {

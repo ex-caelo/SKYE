@@ -1,6 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   parseRoute,
+  parseCurrentRoute,
+  parseCurrentViewRoute,
   buildSwitcherRedirectUrl,
   buildFormUrlForSelectedSite,
   buildSwitcherUrlForSite,
@@ -10,6 +12,25 @@ import {
   looksLikeFormLink,
   parseAuthErrorFromHash,
 } from "../shared/routing.js";
+import { cacheApplicationId, cacheTenantId } from "../shared/auth/tenantResolver.js";
+
+// Same shim as tenantResolver.test.ts — this jsdom build doesn't expose localStorage on an opaque
+// origin, and each test file gets its own isolated jsdom environment (see vitest.config.ts), so
+// this needs installing again here rather than relying on that other file having done it.
+if (typeof globalThis.localStorage === "undefined") {
+  const map = new Map<string, string>();
+  const storage = {
+    getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+    setItem: (k: string, v: string) => void map.set(k, String(v)),
+    removeItem: (k: string) => void map.delete(k),
+    clear: () => map.clear(),
+    key: (i: number) => [...map.keys()][i] ?? null,
+    get length() {
+      return map.size;
+    },
+  };
+  Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
+}
 
 describe("parseRoute", () => {
   it("parses create mode from a bare formId or an explicit /new", () => {
@@ -58,6 +79,46 @@ describe("parseRoute", () => {
     expect(parseRoute("#abc123", "?siteId=site1&applicationId=app1")).toEqual(
       expect.not.objectContaining({ draftId: expect.anything() })
     );
+  });
+});
+
+describe("parseCurrentRoute / parseCurrentViewRoute — recovering a lost applicationId/tenantId", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    history.replaceState({}, "", "/form?siteId=s1#abc123");
+  });
+
+  it("parseCurrentRoute falls back to unresolved when nothing is cached, same as parseRoute", () => {
+    expect(parseCurrentRoute()).toEqual({ page: "unresolved", siteId: "s1", applicationId: undefined, tenantId: undefined });
+  });
+
+  it("parseCurrentRoute recovers a cached applicationId/tenantId and resolves the route", () => {
+    cacheApplicationId("app-1");
+    cacheTenantId("app-1", "tenant-1");
+
+    expect(parseCurrentRoute()).toEqual({
+      page: "form", formId: "abc123", mode: "create", itemId: undefined, siteId: "s1", applicationId: "app-1", tenantId: "tenant-1",
+    });
+    // The recovered values are backfilled into the address bar, so a copied link carries them forward.
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get("applicationId")).toBe("app-1");
+    expect(params.get("tenantId")).toBe("tenant-1");
+  });
+
+  it("a real URL value always wins over the cache, and is what gets remembered", () => {
+    cacheApplicationId("stale-app");
+    history.replaceState({}, "", "/form?siteId=s1&applicationId=app-1#abc123");
+
+    const route = parseCurrentRoute();
+    expect(route).toMatchObject({ applicationId: "app-1" });
+  });
+
+  it("parseCurrentViewRoute recovers the same way", () => {
+    history.replaceState({}, "", "/view?siteId=s1#calendar");
+    cacheApplicationId("app-1");
+    cacheTenantId("app-1", "tenant-1");
+
+    expect(parseCurrentViewRoute()).toEqual({ page: "view", viewId: "calendar", siteId: "s1", applicationId: "app-1", tenantId: "tenant-1" });
   });
 });
 

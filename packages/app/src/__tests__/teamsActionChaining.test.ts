@@ -23,7 +23,7 @@ describe("teams.createChat -> teams.sendMessage chaining", () => {
         trigger: "afterSubmit",
         type: "script",
         functionName: "teams.createChat",
-        args: [{ memberUserIds: ["u1", "u2", "u3"], topic: "Event planning" }],
+        args: [{ memberUserIds: ["u1@x.edu", "u2@x.edu", "u3@x.edu"], topic: "Event planning" }],
       },
       sendMessageAction: {
         trigger: "afterSubmit",

@@ -1,7 +1,17 @@
 import type { FieldConfig } from "@skye/form-config";
 import { getFieldSchemaProperties } from "@skye/form-config";
 import type { GraphListColumn } from "../../shared/sharepoint/types.js";
-import { renderObjectEditor, wrapRow, humanizeKey, type ChangeHandler, type PropertyControlOverrides } from "./schemaControls.js";
+import {
+  renderObjectEditor,
+  wrapRow,
+  humanizeKey,
+  coerceUnknown,
+  stringifyUnknown,
+  type ChangeHandler,
+  type PropertyControlOverrides,
+} from "./schemaControls.js";
+import { renderButtonActionsEditor } from "./buttonActionsEditor.js";
+import type { PostActionEntry } from "./formSettingsEditor.js";
 
 /** controlTypes whose rendering reads field.options (see fieldRegistry.ts) — mirrors populateChoiceOptions.ts's own list. */
 const CHOICE_CONTROL_TYPES = new Set(["select", "radio", "checkboxGroup"]);
@@ -30,9 +40,26 @@ export function renderFieldEditor(
   field: FieldConfig & Record<string, unknown>,
   onChange: ChangeHandler,
   document: Document,
-  context: { listColumns?: GraphListColumn[]; pageKeys?: string[] }
+  context: { listColumns?: GraphListColumn[]; pageKeys?: string[]; scriptActionNames?: string[] }
 ): HTMLElement {
   const overrides: PropertyControlOverrides = {};
+
+  // Only for controlType "button" — every other field gets the generic, presence-toggled
+  // "dictionary" editor this same `actions` property would otherwise fall back to (matching how
+  // `fileStorage`/`calculatedDisplay`/`table` already render for a field whose controlType
+  // doesn't need them). A button's own `actions` isn't optional the same way those are (the
+  // schema requires the key to be present, if empty), so it renders directly — no toggle — with
+  // the same wave-grouped, dependsOn-aware card UI the form-root Post Actions editor uses.
+  if (field.controlType === "button") {
+    overrides.actions = (_prop, parent, notify, doc) => {
+      const actions = (parent.actions ??= {}) as Record<string, PostActionEntry>;
+      const wrap = doc.createElement("div");
+      const heading = doc.createElement("h4");
+      heading.textContent = "Actions (run on click)";
+      wrap.append(heading, renderButtonActionsEditor(actions, notify, doc, context.scriptActionNames ?? []));
+      return wrap;
+    };
+  }
 
   if (context.listColumns && context.listColumns.length > 0) {
     overrides.bindTo = (prop, parent, notify, doc) => {
@@ -98,6 +125,27 @@ export function renderFieldEditor(
       return wrapRow(humanizeKey(prop.key) + (prop.required ? " *" : ""), "Which page (from the form's own pages dict) this field belongs to.", select, doc);
     };
   }
+
+  // customValidators entries can be a bare name or a { name, args } object (see
+  // docs/custom-validators-authoring.md), which is genuinely mixed-shape, so it falls
+  // back to the same raw-JSON textarea the generic "unknown" kind already renders —
+  // this override just swaps in a placeholder that actually explains the shape.
+  overrides.customValidators = (prop, parent, notify, doc) => {
+    const textarea = doc.createElement("textarea");
+    textarea.rows = 3;
+    textarea.value = stringifyUnknown(parent[prop.key]);
+    textarea.placeholder = '["validatorName", { "name": "compareField", "args": { "field": "startTime", "operator": "greaterThan" } }]';
+    textarea.addEventListener("input", () => {
+      parent[prop.key] = coerceUnknown(textarea.value);
+      notify();
+    });
+    return wrapRow(
+      humanizeKey(prop.key),
+      "Names of validator functions from the app's registry, plain or with args — see docs/custom-validators-authoring.md.",
+      textarea,
+      doc
+    );
+  };
 
   return renderObjectEditor(getFieldSchemaProperties(), field, onChange, document, overrides);
 }

@@ -15,9 +15,17 @@
 //
 // A tenant GUID is not a secret — it appears in every token, URL, and
 // discovery document — so caching it in localStorage is fine.
+//
+// This module also remembers applicationId (an Azure app registration's
+// client id, equally non-secret) the same way, and exposes
+// resolveApplicationAndTenantId() as the one place both get recovered
+// together — see that function's own doc comment for why URL and cache
+// win/lose the way they do.
 
 /** localStorage key for the remembered tenant id, per app registration. */
 const CACHE_PREFIX = "skye:auth:tenant:";
+/** localStorage key for the remembered applicationId — the last one a real URL on this browser used. */
+const APPLICATION_ID_CACHE_KEY = "skye:auth:applicationId";
 /** A tenant GUID anywhere in a string. */
 export const TENANT_GUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 /** Entra's fixed "consumers" tenant (personal Microsoft accounts) — never a work/school tenant. */
@@ -64,6 +72,94 @@ export function backfillTenantIdInUrl(tenantId: string): void {
   } catch {
     // no window.history / restricted context — this is cosmetic, not load-bearing
   }
+}
+
+/**
+ * The last applicationId a real URL on this browser successfully used, if any — lets a later URL
+ * that's lost `?applicationId=` (e.g. an MSAL redirect round-trip that couldn't recover the
+ * pre-redirect URL and fell back to the bare origin — see pages/auth.astro's own docstring)
+ * recover it instead of dead-ending. An Azure app registration's client id isn't a secret (it's
+ * public in every token/URL), so caching it in localStorage is fine — same reasoning as the
+ * tenant id cache above.
+ */
+export function getCachedApplicationId(): string | undefined {
+  try {
+    return localStorage.getItem(APPLICATION_ID_CACHE_KEY) ?? undefined;
+  } catch {
+    return undefined; // storage disabled (private mode) — just means no fast path
+  }
+}
+
+/** Remembers an applicationId a real URL provided, so a later URL that loses it can recover it. */
+export function cacheApplicationId(applicationId: string): void {
+  try {
+    localStorage.setItem(APPLICATION_ID_CACHE_KEY, applicationId);
+  } catch {
+    // storage disabled — nothing persists, just no fast path next time
+  }
+}
+
+/** Rewrites the address bar to carry `?applicationId=<id>` — same idea as backfillTenantIdInUrl, for the same reason. */
+export function backfillApplicationIdInUrl(applicationId: string): void {
+  try {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("applicationId") === applicationId) return;
+    url.searchParams.set("applicationId", applicationId);
+    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+  } catch {
+    // no window.history / restricted context — this is cosmetic, not load-bearing
+  }
+}
+
+/**
+ * Resolves applicationId/tenantId for one page load, in the order this app already used at each
+ * call site: URL query param -> that page's own build-time default (if it has one) -> whatever
+ * this browser last used successfully. A value recovered from the cache is backfilled into the
+ * address bar (no navigation), so a link copied from here already carries it forward; the
+ * env-default case is deliberately never backfilled — it's already free, always available
+ * without the URL needing to say so.
+ *
+ * The two ids are NOT treated symmetrically for caching: a genuinely URL-provided applicationId
+ * is remembered here directly (`cacheApplicationId`) — it's not a secret and a wrong value fails
+ * no worse than a missing one already would. A genuinely URL-provided tenantId is deliberately
+ * NOT cached here — only a tenant id a real, successful sign-in actually confirmed gets
+ * remembered (`rememberTenantFromResult`, elsewhere), so a wrong or typo'd `?tenantId=` in some
+ * copied link can never poison this browser's cache for a later, different visit.
+ *
+ * `envDefaults` is each caller's own existing fallback (`PUBLIC_DEFAULT_APPLICATION_ID`/
+ * `PUBLIC_DEFAULT_TENANT_ID`), passed in rather than read here, since not every page used the
+ * same defaults before this existed (`/form` and `/view` never did, only `/switcher`/`/builder`
+ * did) — this only adds the cache layer, it doesn't change which pages accept an env default.
+ */
+export function resolveApplicationAndTenantId(
+  search: string,
+  envDefaults: { applicationId?: string; tenantId?: string } = {}
+): { applicationId: string | undefined; tenantId: string | undefined } {
+  const params = new URLSearchParams(search);
+
+  const urlApplicationId = params.get("applicationId") ?? undefined;
+  let applicationId = urlApplicationId ?? envDefaults.applicationId;
+  if (urlApplicationId) {
+    cacheApplicationId(urlApplicationId);
+  } else if (!applicationId) {
+    const cached = getCachedApplicationId();
+    if (cached) {
+      applicationId = cached;
+      backfillApplicationIdInUrl(cached);
+    }
+  }
+
+  const urlTenantId = params.get("tenantId") ?? undefined;
+  let tenantId = urlTenantId ?? envDefaults.tenantId;
+  if (!tenantId && applicationId) {
+    const cached = getCachedTenantId(applicationId);
+    if (cached) {
+      tenantId = cached;
+      backfillTenantIdInUrl(cached);
+    }
+  }
+
+  return { applicationId, tenantId };
 }
 
 /**

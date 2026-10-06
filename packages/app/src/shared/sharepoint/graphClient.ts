@@ -98,9 +98,9 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
 
 /** Maps a Graph column-definition payload to our simplified GraphListColumn shape. */
 function mapColumn(raw: Record<string, unknown>): GraphListColumn {
-  const columnType = (["text", "note", "number", "currency", "boolean", "dateTime", "choice", "lookup", "personOrGroup", "hyperlinkOrPicture"] as const).find(
-    (t) => t in raw
-  );
+  const columnType = (
+    ["text", "note", "number", "currency", "boolean", "dateTime", "choice", "lookup", "personOrGroup", "hyperlinkOrPicture", "thumbnail"] as const
+  ).find((t) => t in raw);
   const choiceFacet = raw.choice as { choices?: string[]; allowMultipleSelection?: boolean } | undefined;
   const personFacet = raw.personOrGroup as { allowMultipleSelection?: boolean } | undefined;
   return {
@@ -135,11 +135,24 @@ export class RealGraphClient implements GraphClient {
     this.client = Client.initWithMiddleware({ authProvider });
   }
 
-  /** driveId of the site's Site Assets library, or null if it doesn't exist yet. */
+  /**
+   * driveId of the site's Site Assets library, or null if it genuinely
+   * doesn't exist (every resolution tier in `resolveSiteAssetsDrive` ran
+   * and found nothing). A REAL error (403 Forbidden — e.g. this app's
+   * `Sites.Selected` grant doesn't cover this site — a network failure,
+   * a 500, etc.) is deliberately NOT swallowed into `null` here: doing
+   * that used to collapse "you don't have access to check" and "this
+   * site was never set up" into the exact same misleading
+   * `SkyeNotConfiguredError` message, with no way to tell them apart
+   * from the console. Callers that want a boolean "can I write /
+   * does config exist" answer regardless of the reason already handle
+   * this explicitly (see `hasSkyeConfig`'s own comment, and
+   * `probeCanWriteSkyeData`'s deliberate blanket catch).
+   */
   private siteAssetsDriveId(siteId: string): Promise<string | null> {
     let cached = this.siteAssetsDriveCache.get(siteId);
     if (!cached) {
-      cached = this.resolveSiteAssetsDrive(siteId).catch(() => null);
+      cached = this.resolveSiteAssetsDrive(siteId);
       this.siteAssetsDriveCache.set(siteId, cached);
     }
     return cached;
@@ -154,17 +167,12 @@ export class RealGraphClient implements GraphClient {
       const list = (res.value as Array<{ id: string; name?: string; displayName?: string; webUrl?: string; drive?: { id?: string } }> | undefined)?.find(
         isSiteAssetsList
       ) ?? (res.value as Array<{ id: string; drive?: { id?: string } }> | undefined)?.[0];
-      if (list?.drive?.id) {
-        console.log(list.id, 153);
-        return list.drive.id
-      };
+      if (list?.drive?.id) return list.drive.id;
       if (list?.id) {
-        console.log(list.id, 157);
         const drive = await withRetry(() => this.client.api(`/sites/${siteId}/lists/${list.id}/drive`).select("id").get());
         return (drive?.id as string) ?? null;
       }
     } catch (err) {
-      console.log("err", 162);
       if (![400, 404].includes((err as { statusCode?: number })?.statusCode ?? 0)) throw err;
     }
 
@@ -185,34 +193,33 @@ export class RealGraphClient implements GraphClient {
    *   2. a paginated `/lists` scan, then a `/drives` scan.
    */
   private async findSiteAssetsListId(siteId: string): Promise<string | null> {
-    // type ListRow = { id: string; name?: string; displayName?: string; webUrl?: string };
-    // const ignore4xx = (err: unknown): null => {
-    //   const status = (err as { statusCode?: number })?.statusCode ?? 0;
-    //   if (status === 400 || status === 404) return null;
-    //   throw err;
-    // };
-    // console.log('direct lookup ',siteId,189);
-    // // 1. Direct addressing by the URL name.
-    // const direct = await withRetry(() => this.client.api(`/sites/${siteId}/lists/SiteAssets`).select("id").get()).catch(ignore4xx);
-    // if (direct?.id) return direct.id as string;
+    type ListRow = { id: string; name?: string; displayName?: string; webUrl?: string };
+    const ignore4xx = (err: unknown): null => {
+      const status = (err as { statusCode?: number })?.statusCode ?? 0;
+      if (status === 400 || status === 404) return null;
+      throw err;
+    };
 
-    // // 3a. Plain paginated /lists scan (a non-hidden Site Assets, localized name, etc.).
-    // let nextUrl = `/sites/${siteId}/lists?$select=id,name,displayName,webUrl&$top=100`;
-    // while (nextUrl) {
-    //   const page: { value: ListRow[]; "@odata.nextLink"?: string } = await withRetry(() => this.client.api(nextUrl).get());
-    //   const match = page.value.find(isSiteAssetsList);
-    //   if (match) return match.id;
-    //   nextUrl = page["@odata.nextLink"] ?? "";
-    // }
+    // 1. Direct addressing by the URL name.
+    const direct = await withRetry(() => this.client.api(`/sites/${siteId}/lists/SiteAssets`).select("id").get()).catch(ignore4xx);
+    if (direct?.id) return direct.id as string;
 
-    // // 3b. /drives scan — the drive may be listed even when the list isn't. Return its associated list id.
-    // const drives = await withRetry(() => this.client.api(`/sites/${siteId}/drives`).select("id,name,webUrl").get()).catch(ignore4xx);
-    // const driveMatch = (drives?.value as ListRow[] | undefined)?.find(isSiteAssetsList);
-    // if (driveMatch) {
-    //   const list = await withRetry(() => this.client.api(`/drives/${driveMatch.id}/list`).select("id").get()).catch(ignore4xx);
-    //   return (list?.id as string) ?? null;
-    // }
-    // return null;
+    // 2a. Plain paginated /lists scan (a non-hidden Site Assets, localized name, etc.).
+    let nextUrl = `/sites/${siteId}/lists?$select=id,name,displayName,webUrl&$top=100`;
+    while (nextUrl) {
+      const page: { value: ListRow[]; "@odata.nextLink"?: string } = await withRetry(() => this.client.api(nextUrl).get());
+      const match = page.value.find(isSiteAssetsList);
+      if (match) return match.id;
+      nextUrl = page["@odata.nextLink"] ?? "";
+    }
+
+    // 2b. /drives scan — the drive may be listed even when the list isn't. Return its associated list id.
+    const drives = await withRetry(() => this.client.api(`/sites/${siteId}/drives`).select("id,name,webUrl").get()).catch(ignore4xx);
+    const driveMatch = (drives?.value as ListRow[] | undefined)?.find(isSiteAssetsList);
+    if (driveMatch) {
+      const list = await withRetry(() => this.client.api(`/drives/${driveMatch.id}/list`).select("id").get()).catch(ignore4xx);
+      return (list?.id as string) ?? null;
+    }
     return null;
   }
 
@@ -256,20 +263,35 @@ export class RealGraphClient implements GraphClient {
   }
 
   async getListItem(siteId: string, listId: string, itemId: string, select?: string[]): Promise<GraphListItem> {
-    let request = this.client.api(`/sites/${siteId}/lists/${listId}/items/${itemId}`).expand("fields");
-    if (select?.length) request = request.expand(`fields(select=${select.join(",")})`);
-    const res = await withRetry(() => request.get());
+    // A single .expand() call, not two — the Graph SDK's expand builder doesn't merge two
+    // separate calls into one valid `$expand` clause. AND the nested system query option needs
+    // its own `$` prefix — `fields($select=...)`, not `fields(select=...)` — matching the
+    // already-working `doResolveSiteUserId` below; omitting it is what actually produced the
+    // "Term '(select=...)' is not valid" error confirmed live (Graph's OData parser reads
+    // unprefixed `select=...` as a nonsensical trailing term, not a recognized system option).
+    const expand = select?.length ? `fields($select=${select.join(",")})` : "fields";
+    const res = await withRetry(() => this.client.api(`/sites/${siteId}/lists/${listId}/items/${itemId}`).expand(expand).get());
     return { id: res.id, fields: res.fields, etag: res["@odata.etag"] };
   }
 
-  async createListItem(siteId: string, listId: string, fields: Record<string, unknown>): Promise<GraphListItem> {
-    const res = await withRetry(() => this.client.api(`/sites/${siteId}/lists/${listId}/items`).post({ fields }));
+  async createListItem(siteId: string, listId: string, fields: Record<string, unknown>, options?: { preferBetaApiVersion?: boolean }): Promise<GraphListItem> {
+    let request = this.client.api(`/sites/${siteId}/lists/${listId}/items`);
+    if (options?.preferBetaApiVersion) request = request.header("Prefer", "apiversion=2.1");
+    const res = await withRetry(() => request.post({ fields }));
     return { id: res.id, fields: res.fields, etag: res["@odata.etag"] };
   }
 
-  async updateListItem(siteId: string, listId: string, itemId: string, fields: Record<string, unknown>, ifMatchEtag?: string): Promise<GraphListItem> {
+  async updateListItem(
+    siteId: string,
+    listId: string,
+    itemId: string,
+    fields: Record<string, unknown>,
+    ifMatchEtag?: string,
+    options?: { preferBetaApiVersion?: boolean }
+  ): Promise<GraphListItem> {
     let request = this.client.api(`/sites/${siteId}/lists/${listId}/items/${itemId}/fields`);
     if (ifMatchEtag) request = request.header("If-Match", ifMatchEtag);
+    if (options?.preferBetaApiVersion) request = request.header("Prefer", "apiversion=2.1");
     try {
       const res = await withRetry(() => request.patch(fields));
       return { id: itemId, fields: res, etag: res["@odata.etag"] };
@@ -286,7 +308,10 @@ export class RealGraphClient implements GraphClient {
     // MockGraphClient's existing "no query -> just list some users" contract instead of erroring.
     const needle = query.trim();
     let request = this.client.api("/users").header("ConsistencyLevel", "eventual").query({ $count: "true", $top: "10" });
-    if (needle) request = request.query({ $search: `"displayName:${needle}"` });
+    // Each property gets its own quoted term, combined with OR (Graph's $search syntax for
+    // directory objects) — matches a full/partial name OR a full/partial email/UPN, so pasting
+    // an email address into the picker finds the person just as well as typing their name.
+    if (needle) request = request.query({ $search: `"displayName:${needle}" OR "mail:${needle}" OR "userPrincipalName:${needle}"` });
     const res = await withRetry(() => request.get());
     return (res.value as Array<Record<string, unknown>>).map((u) => ({
       id: u.id as string,
@@ -391,15 +416,68 @@ export class RealGraphClient implements GraphClient {
     return null;
   }
 
+  /** `${siteId}::${lookupId}` -> resolved email/UPN (or null). Resolved once per person per session. */
+  private siteUserEmailCache = new Map<string, Promise<string | null>>();
+
+  async resolveSiteUserEmail(siteId: string, lookupId: number): Promise<string | null> {
+    const key = `${siteId}::${lookupId}`;
+    let cached = this.siteUserEmailCache.get(key);
+    if (!cached) {
+      cached = this.doResolveSiteUserEmail(siteId, lookupId).catch(() => null);
+      this.siteUserEmailCache.set(key, cached);
+    }
+    return cached;
+  }
+
+  /**
+   * Fetches the given User Information List item directly by id and pulls a usable email/UPN out
+   * of whichever field actually has one. `EMail` is tried first (it's the right shape when
+   * present) but is the one field most likely blank (see resolveSiteUserId's own comment); falls
+   * back to `UserName` if it's already email-shaped, then to stripping the UPN out of `Name`'s
+   * claims-login format (`i:0#.f|membership|<upn>`) — both of which doResolveSiteUserId's own
+   * matching logic already treats as reliable enough to search on, so trusting them here too is
+   * consistent, not a new assumption.
+   */
+  private async doResolveSiteUserEmail(siteId: string, lookupId: number): Promise<string | null> {
+    const res = await withRetry(() =>
+      this.client
+        .api(`/sites/${siteId}/lists/User Information List/items/${lookupId}`)
+        .expand("fields($select=EMail,UserName,Name)")
+        .get()
+    );
+    const fields = (res.fields as Record<string, unknown> | undefined) ?? {};
+
+    const email = String(fields.EMail ?? "").trim();
+    if (email) return email;
+
+    const userName = String(fields.UserName ?? "").trim();
+    if (userName.includes("@")) return userName;
+
+    const name = String(fields.Name ?? "").trim(); // "i:0#.f|membership|reecsmit@iu.edu"
+    const claimsMatch = name.match(/\|([^|]+@[^|]+)$/);
+    if (claimsMatch) return claimsMatch[1];
+
+    return null;
+  }
+
+  async getCurrentUser(): Promise<{ email?: string }> {
+    const res = await withRetry(() => this.client.api("/me").select("mail,userPrincipalName").get());
+    const email = (res.mail as string | undefined) || (res.userPrincipalName as string | undefined);
+    return { email: email || undefined };
+  }
+
   async deleteListItem(siteId: string, listId: string, itemId: string): Promise<void> {
     await withRetry(() => this.client.api(`/sites/${siteId}/lists/${listId}/items/${itemId}`).delete());
   }
 
   async searchListItems(siteId: string, listId: string, query: ListItemQuery): Promise<ListItemPage> {
+    // Exactly one .expand() call, and the nested option needs its own `$select` (not `select`) —
+    // see getListItem's own comment; same fix, same reasoning.
+    const expand = query.select?.length ? `fields($select=${query.select.join(",")})` : "fields";
     // A cursor is an opaque `@odata.nextLink` from a previous page — follow it directly, ignore everything else.
     let request = query.cursor
       ? this.client.api(query.cursor)
-      : this.client.api(`/sites/${siteId}/lists/${listId}/items`).expand("fields").top(query.top ?? 25);
+      : this.client.api(`/sites/${siteId}/lists/${listId}/items`).expand(expand).top(query.top ?? 25);
 
     if (!query.cursor) {
       if (query.filter) request = request.filter(query.filter);
@@ -407,8 +485,18 @@ export class RealGraphClient implements GraphClient {
       if (query.orderby) request = request.orderby(query.orderby);
       if (query.skip !== undefined) request = request.skip(query.skip);
       if (query.count) request = request.query({ $count: "true" });
-      if (query.select?.length) request = request.expand(`fields(select=${query.select.join(",")})`);
     }
+
+    // A $filter/$orderby on a column SharePoint hasn't indexed 400s without this — its own guard
+    // against a potentially-slow query on a large list (confirmed live: a Custom View's StartTime
+    // sort hit exactly this — "Field 'StartTime' cannot be referenced in filter or orderby as it
+    // is not indexed"). Harmless to send unconditionally, including on a plain search/cursor
+    // continuation that never needed it, so every call gets it rather than tracking which
+    // specific queries do. This covers both Custom Views' author-supplied orderBy/where (the
+    // whole point of which is sorting/filtering on an ordinary, unindexed column) and the
+    // lookupTable parentReference row fetch's own filter, which could hit the same limit as a
+    // related list grows.
+    request = request.header("Prefer", "HonorNonIndexedQueriesWarningMayFailRandomly");
 
     const res = await withRetry(() => request.get());
     return {
@@ -712,7 +800,13 @@ export class RealGraphClient implements GraphClient {
     // the "can this user build?" probe re-runs now that skye_data exists and is theirs.
     this.siteAssetsDriveCache.delete(siteId);
     this.clearCanWriteCache(siteId);
-    const driveId = await this.siteAssetsDriveId(siteId);
+    let driveId: string | null;
+    try {
+      driveId = await this.siteAssetsDriveId(siteId);
+    } catch (err) {
+      if ((err as { statusCode?: number })?.statusCode === 403) throw new SkyeInstallError("forbidden", RealGraphClient.INSTALL_FORBIDDEN_MSG);
+      throw new SkyeInstallError("unknown", "Couldn't check for this site's Site Assets library. Check the console for details.");
+    }
     if (!driveId) {
       throw new SkyeInstallError(
         "siteAssetsMissing",
@@ -796,9 +890,12 @@ export class RealGraphClient implements GraphClient {
       return (await withRetry(() => this.client.api(apiPath).responseType(ResponseType.TEXT).get())) as string;
     };
 
-    const [html, js] = await Promise.all([readText("view.html"), readText("view.js")]);
-    // A view.css is optional — a view may style entirely from view.html or rely on SKYE's shared stylesheet.
-    const css = await readText("view.css").catch(() => "");
+    const html = await readText("view.html");
+    // view.css and view.js are both optional — a view may style entirely from view.html (or rely
+    // on SKYE's shared stylesheet) and, since view-runtime.js's mount() now pulls an inline
+    // <script>'s already-inert text back out and runs it the same way, a single-file view can
+    // skip view.js too and just write <style>/<script> directly in view.html.
+    const [css, js] = await Promise.all([readText("view.css").catch(() => ""), readText("view.js").catch(() => "")]);
     return { html, css, js };
   }
 

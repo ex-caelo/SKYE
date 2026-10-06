@@ -5,6 +5,8 @@ export interface RsvpToEngageEventOptions {
   /** Optional — see client.ts's engageFetch docstring (a whitelabeled proxy may inject this itself). */
   apiKey?: string;
   baseUrl?: string;
+  /** Only meaningful when `baseUrl` points at SKYE's own gated BeInvolved proxy (_server/) — sent as that proxy's required X-Skye-Organization-Id header. See client.ts's engageFetch docstring. */
+  organizationId?: number;
   eventId: number;
   userId: EngageUserIdentifier;
   response: "Yes" | "No";
@@ -27,7 +29,7 @@ export const rsvpToEvent: ScriptAction = async (args, ctx) => {
   const res = await engageFetch(ctx, options.baseUrl ?? DEFAULT_ENGAGE_BASE_URL, options.apiKey, `/v3.0/events/event/${options.eventId}/rsvp`, {
     method: "POST",
     body: { userId: options.userId, response: options.response, guests: options.guests },
-  });
+  }, options.organizationId);
 
   return { rsvpId: res.id, eventId: res.eventId, response: res.response, guests: res.guests };
 };

@@ -1,6 +1,7 @@
 import type { FieldValues } from "../schema/types.js";
 
-export type CustomValidatorFn = (value: unknown, allValues: FieldValues) => true | string;
+/** `args` is only populated for a `{ name, args }` customValidator entry — omitted for a bare-name (parameterless) one. */
+export type CustomValidatorFn = (value: unknown, allValues: FieldValues, args?: Record<string, unknown>) => true | string;
 
 /**
  * The MECHANISM lives here; the actual validator functions do not. Per the

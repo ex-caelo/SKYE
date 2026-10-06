@@ -1,4 +1,7 @@
 ---
+import Loading from "../components/Loading.astro";
+import BaseLayout from "../layouts/BaseLayout.astro";
+
 // The dedicated MSAL redirect landing page — the `redirectUri` for every
 // SKYE MSAL instance (see shared/auth/redirectUri.ts). Its ONLY job is to
 // finish the Microsoft sign-in handshake:
@@ -15,18 +18,7 @@
 // components, nothing to slow the first paint.
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Signing you in… — SKYE</title>
-    <style>
-      body { font: 15px system-ui, sans-serif; margin: 3rem; color: #444; }
-    </style>
-  </head>
-  <body>
-    <p role="status">Signing you in…</p>
-    <script src="../page-scripts/auth.ts"></script>
-  </body>
-</html>
+<BaseLayout title="SKYE — Signing In...">
+  <Loading label="Signing you in…"></Loading>
+  <script src="../page-scripts/auth.ts"></script>
+</BaseLayout>

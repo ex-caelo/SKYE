@@ -4,7 +4,12 @@ import type { GraphClient, GraphListColumn } from "../shared/sharepoint/types.js
 import { checkPersonFieldsResolve } from "../features/form/submit/checkPersonFields.js";
 
 function graphResolving(known: Record<string, number>): GraphClient {
-  return { resolveSiteUserId: vi.fn(async (_s: string, id: string) => known[id] ?? null) } as unknown as GraphClient;
+  return {
+    // Mirrors RealGraphClient.resolveSiteUserId's own numeric fast path: a purely-numeric
+    // identifier (an edit-mode person's already-resolved LookupId) is resolved by definition,
+    // no lookup needed — same reason a bare LookupId key is treated as "already a site user".
+    resolveSiteUserId: vi.fn(async (_s: string, id: string) => (/^\d+$/.test(id) ? Number(id) : (known[id] ?? null))),
+  } as unknown as GraphClient;
 }
 
 const columns: GraphListColumn[] = [
@@ -56,6 +61,26 @@ describe("checkPersonFieldsResolve", () => {
 
   it("skips a people picker that has no selection", async () => {
     const errors = await checkPersonFieldsResolve(graphResolving({}), "site1", fields, columns, { host: [] });
+    expect(errors).toEqual({});
+  });
+
+  it("resolves an UNTOUCHED edit-mode value — raw SharePoint {LookupId, LookupValue, Email} objects, not plain strings — the real live bug this fixes", async () => {
+    // Before the fix, checkPersonFieldsResolve stringified these objects naively
+    // ("[object Object]") instead of extracting a resolvable identifier, so a real,
+    // already-valid site member got wrongly rejected as "not a member of this site" purely
+    // because their value had never been re-picked since the item loaded.
+    const errors = await checkPersonFieldsResolve(
+      graphResolving({ "lison@iu.edu": 14 }),
+      "site1",
+      fields,
+      columns,
+      {
+        host: { LookupId: 14, LookupValue: "Cloteaux, Lison", Email: "lison@iu.edu" },
+        cohosts: [{ LookupId: 22, LookupValue: "Weyandt, Carley Jane", Email: "" }],
+      }
+    );
+    // cohosts' entry has no Email, so it resolves via the numeric LookupId fallback instead —
+    // still correctly resolvable, still not "[object Object]".
     expect(errors).toEqual({});
   });
 });

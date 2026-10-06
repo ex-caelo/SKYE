@@ -26,6 +26,8 @@ export interface CreateEngageEventOptions {
   apiKey?: string;
   /** Defaults to the standard Engage API host; override for a whitelabeled domain (see client.ts). */
   baseUrl?: string;
+  /** Only meaningful when `baseUrl` points at SKYE's own gated BeInvolved proxy (_server/) — sent as that proxy's required X-Skye-Organization-Id header. See client.ts's engageFetch docstring. */
+  organizationId?: number;
   submittedByOrganizationId: number;
   submittedById: EngageUserIdentifier;
   name: string;
@@ -69,7 +71,13 @@ export const createEvent: ScriptAction = async (args, ctx) => {
       imageUrl: options.imageUrl,
       visibility: options.visibility,
     },
-  });
+  }, options.organizationId);
 
-  return { eventId: res.id, name: res.name, startsOn: res.startsOn, endsOn: res.endsOn };
+  // accessCode: the event's attendance-scanner check-in code — confirmed present on the real
+  // response (Engage's own "3.0-Event-PostPutResponse" schema, fetched and parsed directly from
+  // the live OpenAPI spec at https://engage-api.campuslabs.com/swagger/swagger.json, since a
+  // summarized reading had previously missed it — see CLAUDE.md's own note on why this integration
+  // always pulls the raw spec). Was previously left out of this return value entirely, which is
+  // why a config already referencing {{results.createEvent.accessCode}} silently resolved to "".
+  return { eventId: res.id, name: res.name, startsOn: res.startsOn, endsOn: res.endsOn, accessCode: res.accessCode };
 };

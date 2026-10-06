@@ -1,4 +1,4 @@
-import { PublicClientApplication, InteractionRequiredAuthError, type AuthenticationResult } from "@azure/msal-browser";
+import { PublicClientApplication, InteractionRequiredAuthError, BrowserAuthError, BrowserAuthErrorCodes, type AuthenticationResult } from "@azure/msal-browser";
 import type { AuthenticationProvider } from "@microsoft/microsoft-graph-client";
 import {
   backfillTenantIdInUrl,
@@ -101,7 +101,19 @@ async function initAndTrySilent(msal: PublicClientApplication, scopes: string[])
   try {
     return await msal.acquireTokenSilent({ scopes, account });
   } catch (err) {
-    if (!(err instanceof InteractionRequiredAuthError)) throw err;
+    // InteractionRequiredAuthError is the clean "silent genuinely can't work" signal. A
+    // BrowserAuthError with code "timed_out" is a second, equally real reason to fall through
+    // to interactive rather than treat as fatal: acquireTokenSilent's fallback path opens a
+    // hidden iframe to the authority and waits for it to respond, and that iframe can simply
+    // never complete — a slow network, or (increasingly common on modern browsers restricting
+    // third-party cookies, e.g. Safari ITP / Chrome's phase-out) the authority's session cookie
+    // being unreadable inside the iframe at all — without MSAL ever getting far enough to
+    // recognize it as "interaction required." Confirmed live: a real user hit exactly this
+    // (GraphError: timed_out) and, before this fix, it bubbled all the way to the page's fatal
+    // error state instead of ever showing the popup the redirect/popup flow below would have
+    // handled fine.
+    const isSilentTimeout = err instanceof BrowserAuthError && err.errorCode === BrowserAuthErrorCodes.timedOut;
+    if (!(err instanceof InteractionRequiredAuthError) && !isSilentTimeout) throw err;
     return null; // fall through to interactive acquisition
   }
 }

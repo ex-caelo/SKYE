@@ -46,6 +46,24 @@ function optionElement(document: Document, value: unknown, label?: string): HTML
   return option;
 }
 
+/**
+ * A `<select>`'s first option is selected by default the instant it renders, with no user
+ * action — without this, a field with no `defaultValue` would silently submit whatever its
+ * first real option happens to be, never having actually been "filled in". Disabled so it
+ * can't be re-selected once left, and its empty value fails native `required` validation
+ * until a real option is chosen — the same contract a required `<input>` already has. A
+ * `defaultValue`, if set, still wins: renderField.ts sets `.value` directly after this,
+ * which deselects this placeholder in favor of the matching real option.
+ */
+function selectPlaceholderOption(document: Document): HTMLOptionElement {
+  const option = document.createElement("option");
+  option.value = "";
+  option.textContent = "Select an option…";
+  option.disabled = true;
+  option.selected = true;
+  return option;
+}
+
 /** Builds a labeled radio or checkbox group inside a <fieldset> — the one case where a single field key maps to several real inputs, matching how the schema's `radio`/`checkboxGroup` controlTypes are described. */
 function buildChoiceGroup(inputType: "radio" | "checkbox") {
   return (field: FieldConfig, document: Document): HTMLElement[] => {
@@ -129,7 +147,7 @@ export const fieldRegistry: Record<string, ControlDefinition> = {
   select: {
     tag: "select",
     mapAttributes: (f) => commonInputAttributes(f),
-    buildChildren: (f, document) => (f.options ?? []).map((opt) => optionElement(document, opt.value, opt.label)),
+    buildChildren: (f, document) => [selectPlaceholderOption(document), ...(f.options ?? []).map((opt) => optionElement(document, opt.value, opt.label))],
     valueAccessor: "value",
     changeEvents: ["change"],
   },
@@ -195,6 +213,23 @@ export const fieldRegistry: Record<string, ControlDefinition> = {
     tag: "skye-calculated-display",
     mapAttributes: (f) => commonInputAttributes(f),
     valueAccessor: "none", // derived, never user-edited or read back for validation the normal way
+    changeEvents: [],
+  },
+  // A real <button>, not a value-bearing control — renderField.ts gives it its own bespoke
+  // rendering branch (a status output alongside it, no label/help-text chrome), the same way it
+  // already special-cases heading/paragraph/divider, so this entry mainly exists for registry
+  // completeness (getControlDefinition, schema introspection) rather than being built generically
+  // from mapAttributes/configureElement the way most controls are.
+  button: {
+    tag: "button",
+    // Deliberately doesn't read `f.readonly` — view mode forces every OTHER field's `readonly`
+    // to protect a value from being changed, which has no meaning for a button (nothing on it to
+    // protect). A button's whole point can be a "quick action" a viewer takes without switching
+    // to edit mode (e.g. an approver clicking "Approve" while just viewing an item) — see
+    // page-scripts/form.ts, which deliberately excludes controlType "button" from its own
+    // view-mode readonly-forcing loop for the same reason.
+    mapAttributes: () => ({ type: "button" }),
+    valueAccessor: "none",
     changeEvents: [],
   },
 };

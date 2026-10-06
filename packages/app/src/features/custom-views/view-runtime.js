@@ -43,14 +43,29 @@
   // The view's files arrive as data and are installed with DOM APIs, so
   // none of them is ever parsed as part of this document's source.
   function mount({ html, css, js }) {
-    document.body.innerHTML = html; // <script> in view.html will NOT run — put JS in view.js
+    document.body.innerHTML = html; // any <script> in html lands in the DOM but is permanently inert — the DOM spec never runs a script element inserted this way, full stop
+    document.querySelector('html').classList.add('skye-view__html');
+    document.body.classList.add('skye-view__body');
     const style = document.createElement("style");
-    style.textContent = css; // textContent cannot break out of the element
+    style.textContent = css; // textContent cannot break out of the element; a <style> inserted this way DOES take effect, unlike <script>
+
+    // A single-file view can skip view.js/view.css entirely and write its own <style>/<script>
+    // right in view.html instead. The <style> case already works for free (see above); a
+    // <script> case needs one extra step: pull each element's already-dead text back out and run
+    // it through the exact same AsyncFunction path a separate view.js uses below. This opens no
+    // new way for author code to execute — the DOM guarantee above already killed these elements —
+    // it just lets that one execution path accept its input from a second place.
+    const inlineScripts = [...document.body.querySelectorAll("script")].map((el) => {
+      el.remove();
+      return el.textContent ?? "";
+    });
     document.head.append(style);
+
+    const combinedJs = [js, ...inlineScripts].filter(Boolean).join(";\n");
 
     // Async so authors get top-level await; sourceURL so stack traces say view.js, not "eval".
     const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
-    new AsyncFunction(`${js}\n//# sourceURL=view.js`)().catch((e) => {
+    new AsyncFunction(`${combinedJs}\n//# sourceURL=view.js`)().catch((e) => {
       document.body.textContent = e && e.message ? e.message : String(e);
     });
   }

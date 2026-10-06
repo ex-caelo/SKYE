@@ -1,6 +1,6 @@
 import type { FormConfig, FormConfigOverlay, SchemaProperty } from "@skye/form-config";
 import { getFormTopLevelProperties, getPageSchemaProperties, getPostActionSchemaProperties } from "@skye/form-config";
-import type { GraphListColumn } from "../../shared/sharepoint/types.js";
+import type { GraphListColumn, SkyeViewSummary } from "../../shared/sharepoint/types.js";
 import { fieldConfigForColumn, fieldKeyForColumn, missingRequiredColumns } from "./columnMapping.js";
 import { renderObjectEditor, renderNamedObjectDictionary, renderPropertyControl, wrapRow, type ChangeHandler, type PropertyControlOverrides } from "./schemaControls.js";
 
@@ -17,6 +17,8 @@ export interface FormSettingsEditorOptions {
   scriptActionNames?: string[];
   /** The target list's live column schema — powers the "missing required columns" check below. */
   listColumns?: GraphListColumn[];
+  /** The site's real Custom Views (skye_data/views/) — powers the top-level `backView` setting's dropdown. */
+  skyeViews?: SkyeViewSummary[];
   /** Page a newly-added required-column field is placed on (usually the first page). */
   defaultPageKey?: string;
   /** Show the "required SharePoint columns with no field" panel (only meaningful for a full config — base or draft, not an additive overlay). */
@@ -55,7 +57,11 @@ export function renderFormSettingsEditor(
   const settingsHeading = document.createElement("h3");
   settingsHeading.textContent = "Form settings";
   container.appendChild(settingsHeading);
-  container.appendChild(renderObjectEditor(getFormTopLevelProperties(), config as unknown as Record<string, unknown>, onChange, document));
+  container.appendChild(
+    renderObjectEditor(getFormTopLevelProperties(), config as unknown as Record<string, unknown>, onChange, document, {
+      backView: renderBackViewControl(options.skyeViews ?? []),
+    })
+  );
 
   const pagesHeading = document.createElement("h3");
   pagesHeading.textContent = "Pages";
@@ -160,7 +166,7 @@ function renderMissingRequiredPanel(
 
 // --- post actions, grouped by trigger phase ---------------------------------
 
-type PostActionEntry = Record<string, unknown> & { trigger?: string; type?: string; dependsOn?: string[] };
+export type PostActionEntry = Record<string, unknown> & { trigger?: string; type?: string; dependsOn?: string[] };
 
 /** The four `trigger` phases, in the order the submit pipeline runs them (submitForm.ts). */
 const PHASES: ReadonlyArray<{ key: string; label: string; blurb: string }> = [
@@ -179,7 +185,7 @@ const PHASE_KEYS = new Set(PHASES.map((p) => p.key));
  * A dependency cycle (which the config lint flags separately) degrades to
  * wave 0 rather than looping forever.
  */
-function computeWaves(phaseKeys: string[], postActions: Record<string, PostActionEntry>): string[][] {
+export function computeWaves(phaseKeys: string[], postActions: Record<string, PostActionEntry>): string[][] {
   const inPhase = new Set(phaseKeys);
   const depthCache = new Map<string, number>();
   const visiting = new Set<string>();
@@ -459,7 +465,7 @@ function renderDependsOnControl(
 }
 
 /** `functionName` (script actions) as a `<select>` grouped by service, sourced from the app's real registry. */
-function renderFunctionNameControl(
+export function renderFunctionNameControl(
   actionNames: string[]
 ): (prop: SchemaProperty, parent: Record<string, unknown>, onChange: ChangeHandler, document: Document) => HTMLElement {
   return (prop, parent, onChange, document) => {
@@ -497,5 +503,41 @@ function renderFunctionNameControl(
 
     const description = typeof prop.schema.description === "string" ? (prop.schema.description as string) : undefined;
     return wrapRow("Function name *", description, select, document);
+  };
+}
+
+/**
+ * `backView` as a `<select>` of the site's real Custom Views, not a
+ * hand-typed view id — same reasoning as `renderFunctionNameControl`
+ * above: a form author shouldn't need to know/copy a view's internal id
+ * to link back to it. Empty list (no views on this site yet, or they
+ * couldn't be loaded) falls back to the generic free-text control instead
+ * of showing a dropdown with nothing in it.
+ */
+export function renderBackViewControl(
+  views: SkyeViewSummary[]
+): (prop: SchemaProperty, parent: Record<string, unknown>, onChange: ChangeHandler, document: Document) => HTMLElement {
+  return (prop, parent, onChange, document) => {
+    if (views.length === 0) return renderPropertyControl(prop, parent, onChange, document);
+
+    const select = document.createElement("select");
+    select.add(new Option("— no Back link —", ""));
+    for (const view of views) select.add(new Option(view.title, view.viewId));
+
+    const currentValue = parent.backView as string | undefined;
+    if (currentValue && !views.some((v) => v.viewId === currentValue)) {
+      // Don't silently drop a view id this listing didn't return (deleted, or on another site) —
+      // show it, flagged, same as an unregistered script action's functionName above.
+      select.add(new Option(`${currentValue} (not found)`, currentValue));
+    }
+    select.value = currentValue ?? "";
+
+    select.addEventListener("change", () => {
+      parent.backView = select.value || undefined;
+      onChange();
+    });
+
+    const description = typeof prop.schema.description === "string" ? (prop.schema.description as string) : undefined;
+    return wrapRow("Back link", description, select, document);
   };
 }

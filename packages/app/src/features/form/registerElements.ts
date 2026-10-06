@@ -11,6 +11,7 @@
 import type { LookupTable } from "@skye/form-config";
 import type { LookupItemResult, PersonResult } from "../../shared/sharepoint/types.js";
 import type { LookupTableRow } from "./submit/lookupTableRows.js";
+import { personIdentifier } from "./submit/personIdentifier.js";
 
 /**
  * Base class giving every SKYE custom element a consistent get/set `value`
@@ -218,6 +219,46 @@ class SkyePeoplePicker extends SkyeValueElement {
   private picked: PickedPerson[] = [];
   private results: PersonResult[] = [];
 
+  /**
+   * Overrides the base class's plain `return this._value` — ALWAYS returns
+   * the normalised `string[]` of resolvable keys derived from `picked`,
+   * never whatever raw shape `_value` was last SET to. A real live bug
+   * this fixes: before this override, `.value` returned the untouched raw
+   * seed (a SharePoint `{LookupId, LookupValue, Email}` object, or an
+   * array of them) for any field the user never re-picked since load — and
+   * NOT every caller of `.value` normalises that shape the way
+   * `checkPersonFieldsResolve`/the submit encoder now do (see
+   * `personIdentifier.ts`). A button's own `{{fields.x}}` action
+   * templating (`runButtonActions.ts` reads `rendered.getValues()`
+   * directly, with no normalisation layer of its own) is exactly such a
+   * caller: the Luddy approve button's `teams.createChat` action
+   * stringified an untouched Host/Cohosts object straight into a Graph
+   * `user@odata.bind` URL as literal `"[object Object]"`, which Graph
+   * correctly rejected with 400. `picked` is already normalised via
+   * `normalisePeopleValue` the instant a value is set (`connectedCallback`/
+   * `render`'s re-sync, both below) — this override just stops `.value`
+   * from bypassing that and handing out the pre-normalised raw shape
+   * instead.
+   */
+  get value(): unknown {
+    return this.picked.map((p) => p.key);
+  }
+  // A subclass defining `get value()` alone would shadow the base class's `set value()` too (JS
+  // accessor pairs are one property descriptor — overriding the getter without a setter makes
+  // assignment throw in strict mode, which ES modules always are), so this overrides both.
+  // Recomputes `picked` directly here rather than leaning on render()'s old re-sync heuristic
+  // (removed below) — that heuristic compared `picked`'s keys against `_value` treated AS an
+  // array of keys, which silently failed to resync for a non-array single-value seed (an object,
+  // not wrapped in an array) landing on an already-empty `picked`: `arraysShallowEqual([], [])`
+  // came back "equal" even though the new value was never actually normalised. A real, live
+  // instance of exactly that: setting an untouched Host field's seed value straight after
+  // creation (empty `picked`) stayed `[]` instead of becoming the host's resolvable key.
+  set value(v: unknown) {
+    this._value = v;
+    this.picked = normalisePeopleValue(v);
+    this.render();
+  }
+
   connectedCallback() {
     this.classList.add("skye-token-picker");
     this.picked = normalisePeopleValue(this._value);
@@ -310,10 +351,11 @@ class SkyePeoplePicker extends SkyeValueElement {
 
   protected render(): void {
     if (!this.box || !this.input) return;
-    // Re-sync from an externally-set value (edit-mode prefill / setFieldValue).
-    if (!arraysShallowEqual(this.picked.map((p) => p.key), Array.isArray(this._value) ? (this._value as string[]) : [])) {
-      this.picked = normalisePeopleValue(this._value);
-    }
+    // `picked` is already correct by the time render() runs — connectedCallback() and the
+    // `set value` override above both recompute it directly from the new value, and add()/
+    // removeChip() mutate it themselves before calling render(). No heuristic re-sync needed
+    // (a previous version tried to guess from `_value` here and got it wrong for a non-array
+    // single-value seed — see `set value`'s own comment).
     for (const chip of Array.from(this.box.querySelectorAll(".skye-token"))) chip.remove();
     for (const person of this.picked) {
       const chip = document.createElement("span");
@@ -331,28 +373,30 @@ class SkyePeoplePicker extends SkyeValueElement {
   }
 }
 
-/** Normalises whatever got assigned to a people picker's `value` into `{key,label}` chips: a string[], a single string, or SharePoint person objects from an existing item. */
+/**
+ * Normalises whatever got assigned to a people picker's `value` into
+ * `{key,label}` chips: a string[], a single string, or SharePoint person
+ * objects from an existing item. The key comes from the shared
+ * `personIdentifier` (same priority the submit-side resolution checks now
+ * use too — Email, then numeric LookupId, then a generic id) so a chip's
+ * key and what `checkPersonFieldsResolve`/the submit encoder actually
+ * resolve against can never drift apart again (they used to: this file had
+ * its own copy of this priority list while the submit-side checks did a
+ * naive `String(entry)` instead — see `personIdentifier.ts`'s own doc
+ * comment for the real bug that caused).
+ */
 function normalisePeopleValue(value: unknown): PickedPerson[] {
   const list = Array.isArray(value) ? value : value === undefined || value === null || value === "" ? [] : [value];
   return list
     .map((entry): PickedPerson | undefined => {
-      if (typeof entry === "string") return { key: entry, label: entry };
-      if (entry && typeof entry === "object") {
-        const o = entry as Record<string, unknown>;
-        // Key priority puts the numeric `LookupId` ahead of the display name: an edit-mode person
-        // seed often has no email, and the submit encoder short-circuits a numeric key straight to
-        // an already-resolved site user id — a display-name key would fail to re-resolve on save.
-        const key = String(o.Email ?? o.email ?? o.LookupId ?? o.id ?? o.LookupValue ?? "");
-        const label = String(o.LookupValue ?? o.displayName ?? o.Email ?? o.email ?? key);
-        return key ? { key, label } : undefined;
-      }
-      return undefined;
+      const key = personIdentifier(entry);
+      if (!key) return undefined;
+      if (typeof entry === "string") return { key, label: entry };
+      const o = entry as Record<string, unknown>;
+      const label = String(o.LookupValue ?? o.displayName ?? o.Email ?? o.email ?? key);
+      return { key, label };
     })
     .filter((p): p is PickedPerson => p !== undefined);
-}
-
-function arraysShallowEqual(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
 /**
@@ -433,6 +477,14 @@ class SkyeLookupTable extends SkyeValueElement {
         const input = col.controlType === "select" ? document.createElement("select") : document.createElement("input");
 
         if (input instanceof HTMLSelectElement) {
+          // Same fix as fieldRegistry.ts's own select control: with no placeholder, an empty
+          // `input.value = ""` below wouldn't match any real option and the browser would fall
+          // back to auto-selecting the first one — silently "filling in" a value nobody chose.
+          const placeholder = document.createElement("option");
+          placeholder.value = "";
+          placeholder.textContent = "Select an option…";
+          placeholder.disabled = true;
+          input.appendChild(placeholder);
           for (const opt of col.options ?? []) {
             const optionEl = document.createElement("option");
             optionEl.value = String(opt.value);

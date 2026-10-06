@@ -1,0 +1,17 @@
+<!-- Demonstrates a single-file Custom View: no separate view.css/view.js at all. The <style>
+     below takes effect the normal way (a stylesheet element inserted via innerHTML still applies).
+     The <script> below is inert the instant it lands in the DOM this way (a hard DOM guarantee,
+     not a SKYE-specific rule) — view-runtime.js's mount() pulls its already-dead text back out and
+     runs it through the exact same AsyncFunction path a separate view.js would use. -->
+<style>
+  #single-file-demo-output {
+    font-weight: 600;
+    color: #15803d;
+  }
+</style>
+
+<p id="single-file-demo-output">not yet run</p>
+
+<script>
+  document.getElementById("single-file-demo-output").textContent = `single-file view ran; can see lists: ${(await skye.lists()).join(", ")}`;
+</script>

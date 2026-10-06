@@ -10,6 +10,7 @@
     "title": { "type": "string" },
     "description": { "type": "string" },
     "mode": { "enum": ["create", "edit", "both"] },
+    "backView": { "type": "string" },
     "list": {
       "type": "object",
       "additionalProperties": false,

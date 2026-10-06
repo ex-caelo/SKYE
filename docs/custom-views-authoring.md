@@ -1,17 +1,31 @@
 # Authoring a SKYE Custom View
 
-A **Custom View** is a small web page you write — one `view.html`, one
-`view.css`, one `view.js` — that SKYE renders as a read-only UI (a
-calendar, a chart, a dashboard) backed by your SharePoint lists. You put
-the three files in a folder under your site's `skye_data/views/` library:
+A **Custom View** is a small web page you write — `view.html`, plus
+optionally `view.css` and `view.js` — that SKYE renders as a read-only UI
+(a calendar, a chart, a dashboard) backed by your SharePoint lists. You
+put the file(s) in a folder under your site's `skye_data/views/` library:
 
 ```
 skye_data/views/team-calendar/
   view.html
-  view.css
-  view.js
+  view.css       (optional)
+  view.js        (optional)
   view.json      (optional — { "title": "Team calendar" } for the switcher label)
 ```
+
+**Two ways to lay this out, both fully supported:**
+
+- **Three files** — `view.css` for styles, `view.js` for code, `view.html`
+  for structure. Good for a longer view where separate files stay easier
+  to navigate.
+- **One file** — skip `view.css`/`view.js` entirely and write a `<style>`
+  and a `<script>` directly inside `view.html`. Good for a short view
+  where three tiny files are more overhead than help.
+
+You can also mix them (some CSS/JS in the separate files, more inline in
+`view.html`) — SKYE runs whatever it finds in either place. See "How it
+runs" below for why an inline `<script>` here behaves exactly like a
+separate `view.js`, not like a normal web page's script tag.
 
 Then it's reachable at `/view?siteId=<id>&applicationId=<id>#team-calendar`.
 
@@ -37,12 +51,19 @@ token; your view never sees it. Every read the host makes runs as **the
 signed-in viewer's own permissions** — a view can't show someone data
 they couldn't already open in SharePoint themselves.
 
-`<script>` tags inside `view.html` do **not** run. Put all JavaScript in
-`view.js`. You get top-level `await` there.
+A `<script>` tag SKYE finds inside `view.html` is inert the instant the
+page installs it — that's a normal, hard rule of how browsers handle
+`<script>` elements inserted this way, true on any web page, not
+something SKYE adds. So SKYE pulls that already-dead code's text back out
+and runs it itself, the exact same way it runs a separate `view.js` —
+whichever one you use (or both — they're just concatenated), you get
+top-level `await` either way.
 
 You don't need to style basic elements — the view inherits SKYE's
-stylesheet (typography, buttons, tables). `view.css` is for your
-view-specific layout.
+stylesheet (typography, buttons, tables). A `<style>` tag works fine
+directly inside `view.html` (unlike `<script>`, a `<style>` inserted this
+way takes effect immediately, no special handling needed) — `view.css` is
+just the alternative for when you'd rather keep styles in their own file.
 
 ---
 
@@ -191,6 +212,29 @@ for (const { fields } of rows.items) {
   li.textContent = `${fields.Start} — ${fields.Title}`;
   ul.append(li);
 }
+```
+
+The same view as a single file:
+
+`view.html`
+```html
+<h2 id="title">Upcoming events</h2>
+<ul id="list"></ul>
+
+<script>
+  const rows = await skye.list("Events", {
+    where: { field: "Start", operator: "greaterThanOrEqual", value: "2026-09-01" },
+    orderBy: [{ field: "Start", direction: "asc" }],
+    top: 20,
+  });
+
+  const ul = document.getElementById("list");
+  for (const { fields } of rows.items) {
+    const li = document.createElement("li");
+    li.textContent = `${fields.Start} — ${fields.Title}`;
+    ul.append(li);
+  }
+</script>
 ```
 
 ---

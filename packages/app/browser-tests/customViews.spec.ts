@@ -17,6 +17,16 @@ test.describe("Custom View sandbox", () => {
     await expect(page.locator(".skye-view__status")).toHaveText("", { timeout: 30_000 });
   });
 
+  test("a single-file view (view.html only, no view.css/view.js) runs its inline <script>", async ({ page }) => {
+    await page.goto("/view?siteId=x&applicationId=x#single-file-demo");
+    const frame = await viewFrame(page);
+    // The <script> is inert the instant `innerHTML` inserts it (a hard DOM guarantee) — this
+    // text only appears if view-runtime.js's mount() pulled it back out and actually ran it.
+    await expect(frame.locator("#single-file-demo-output")).toHaveText(/^single-file view ran; can see lists:/, {
+      timeout: 30_000,
+    });
+  });
+
   test("every security probe reports BLOCKED", async ({ page }) => {
     // The host logs every probe verdict as `[probe] <label> : <verdict>` —
     // that's the source of truth, since the final navigation probes can tear

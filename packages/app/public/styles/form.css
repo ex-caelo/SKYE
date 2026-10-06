@@ -6,17 +6,21 @@
 
 body {
 	font-family: system-ui, sans-serif;
-	margin: 2rem;
+	/* Top margin reserves room for the fixed-position logo (see bootstrap.css's #skye-logo), so the
+	   content container starts below it at every width above the small-viewport breakpoint. */
+	margin: 5rem 2rem 0 2rem;
 	color: var(--text-primary);
 	background-image: url("/assets/skye.webp");
 	background-size: cover;
-	min-height: 100svh;
+	min-height: calc(100svh - 2rem);
 }
 
 #skye-app {
 	background: var(--background);
 	padding: 20px 30px;
 	border-radius: 8px;
+	max-width: 1000px;
+	margin: 0 auto;
 }
 
 /* Pages ship every state in the markup and toggle it with `hidden` (see lib/ui/pageState.ts) —
@@ -33,15 +37,15 @@ body {
 	display: flex;
 	gap: 0.5rem;
 	margin-bottom: 1.5rem;
-	border-bottom: var(--border-size) solid #ddd;
 }
 .skye-form__tabs button {
-	padding: 10px 15px;
+	padding: 10px 20px;
 	justify-content: center;
 	align-items: center;
 	border-radius: var(--border-radius);
-	background: #eaeaea;
+	background: var(--background-lightest);
 	color: var(--text-primary);
+	/* clip-path: polygon(15.709% 46.281%, 0.877% 8.982%, 0.877% 8.982%, 0.548% 7.925%, 0.346% 6.774%, 0.263% 5.579%, 0.292% 4.388%, 0.424% 3.247%, 0.652% 2.207%, 0.967% 1.313%, 1.363% 0.616%, 1.83% 0.162%, 2.36% 0%, 79.847% 0%, 79.847% 0%, 80.013% 0.017%, 80.177% 0.066%, 80.338% 0.147%, 80.496% 0.259%, 80.65% 0.401%, 80.798% 0.574%, 80.941% 0.775%, 81.078% 1.004%, 81.208% 1.261%, 81.33% 1.544%, 99.12% 46.281%, 99.12% 46.281%, 99.34% 46.933%, 99.512% 47.646%, 99.635% 48.405%, 99.708% 49.195%, 99.733% 50%, 99.708% 50.805%, 99.635% 51.595%, 99.512% 52.354%, 99.34% 53.067%, 99.12% 53.719%, 81.33% 98.456%, 81.33% 98.456%, 81.208% 98.739%, 81.078% 98.996%, 80.941% 99.225%, 80.798% 99.426%, 80.65% 99.599%, 80.496% 99.741%, 80.338% 99.853%, 80.177% 99.934%, 80.013% 99.983%, 79.847% 100%, 2.36% 100%, 2.36% 100%, 1.83% 99.838%, 1.363% 99.384%, 0.967% 98.687%, 0.652% 97.794%, 0.424% 96.753%, 0.292% 95.612%, 0.263% 94.421%, 0.346% 93.226%, 0.548% 92.075%, 0.877% 91.018%, 15.709% 53.719%, 15.709% 53.719%, 15.93% 53.067%, 16.101% 52.354%, 16.224% 51.595%, 16.298% 50.805%, 16.322% 50%, 16.298% 49.195%, 16.224% 48.405%, 16.101% 47.646%, 15.93% 46.933%, 15.709% 46.281%); */
 }
 .skye-form__tab--active {
 	background: var(--primary-medium) !important;
@@ -165,7 +169,7 @@ input[type="checkbox"].skye-switch::before {
 	left: 2px;
 	width: 1.1rem;
 	height: 1.1rem;
-	background: white;
+	background: var(--background-secondary);
 	border-radius: 50%;
 	transition: transform 0.15s;
 }
@@ -225,22 +229,91 @@ input[type="checkbox"].skye-switch:checked::before {
 	background-color: var(--background-light);
 }
 
-/* --- file field ("Poster"): a tall drop zone that fills its (possibly row-spanning) grid cell --- */
+/* --- file field ("Poster"): a tall drag-and-drop zone that fills its (possibly row-spanning) grid cell --- */
 .skye-field--file {
 	height: 100%;
 }
-.skye-field--file input[type="file"] {
+.skye-file-upload {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 0.75rem;
 	flex: 1 1 auto;
 	min-height: 12rem;
+	height: 100%;
 	width: 100%;
 	padding: 1.25rem;
 	border: 2px dashed var(--border);
 	border-radius: 10px;
 	background: var(--background-secondary);
+	transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.skye-file-upload:hover {
+	background-color: var(--primary-lightest);
+}
+.skye-file-upload--dragover {
+	border-color: var(--primary-medium);
+	background-color: var(--primary-light);
+}
+.skye-file-upload input[type="file"] {
+	width: 100%;
+	max-width: 22rem;
 	cursor: pointer;
 }
-.skye-field--file input[type="file"]:hover {
-	background-color: var(--primary-light);
+
+/* --- file field preview: shown once a file is picked, either a thumbnail (images) or a generic icon --- */
+.skye-file-upload__preview {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	width: 100%;
+	max-width: 22rem;
+	padding: 0.5rem 0.75rem;
+	background: var(--background-lightest);
+	border: var(--border-size) solid var(--border);
+	border-radius: var(--border-radius);
+}
+.skye-file-upload__thumb {
+	width: 2.5rem;
+	height: 2.5rem;
+	object-fit: cover;
+	border-radius: 4px;
+	flex-shrink: 0;
+}
+.skye-file-upload__icon {
+	font-size: 1.5rem;
+	line-height: 1;
+	flex-shrink: 0;
+}
+.skye-file-upload__meta {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	flex: 1 1 auto;
+}
+.skye-file-upload__name {
+	font-size: 0.9rem;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.skye-file-upload__size {
+	font-size: 0.8rem;
+	color: var(--text-secondary);
+}
+.skye-file-upload__remove {
+	flex-shrink: 0;
+	border: none;
+	background: none;
+	color: var(--text-secondary);
+	font-size: 1.1rem;
+	line-height: 1;
+	cursor: pointer;
+	padding: 0.25rem;
+}
+.skye-file-upload__remove:hover {
+	color: var(--danger);
 }
 
 /* --- token / chip picker: people picked as discrete removable units (no delimiters for the user) --- */
@@ -434,6 +507,7 @@ input[type="checkbox"].skye-switch:checked::before {
 
 	th {
 		border-style: solid none solid solid;
+		background-color: var(--background-secondary);
 	}
 
 	th:last-child {
@@ -515,10 +589,40 @@ input[type="checkbox"].skye-switch:checked::before {
 	margin-bottom: 1rem;
 	font-size: 0.9rem;
 }
-.skye-form__edit-link {
-	display: inline-block;
+.skye-form__nav {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 1rem;
 	margin-bottom: 1rem;
+	align-items: center;
+}
+.skye-form__nav-link {
+	display: inline-block;
 	font-size: 0.85rem;
+}
+
+.skye-form__submitted-message {
+	display: block;
+	margin-bottom: 1rem;
+}
+.skye-form__submitted-message[data-level="warning"] {
+	color: #b45309;
+}
+.skye-form__submitted-message[data-level="success"] {
+	color: #15803d;
+}
+.skye-form__submitted-actions {
+	display: flex;
+	gap: 0.75rem;
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+.skye-form__submitted-action {
+	display: inline-block;
+	padding: 0.5rem 1.25rem;
+	border: var(--border-size) solid var(--border);
+	text-decoration: none;
 }
 
 .skye-site-switcher ul {
@@ -662,6 +766,13 @@ td[data-level="error"] {
 		background: white;
 		height: auto;
 	}
+	/* The logo is position:fixed on wide screens (floating over the page background). On a narrow
+	   screen that overlaps the top of the content, so it moves into normal flow above it instead. */
+	#skye-logo {
+		position: static;
+		display: block;
+		margin: 1rem 1rem 0;
+	}
 	#skye-app {
 		padding: 1rem;
 		border-radius: 0;
@@ -691,7 +802,7 @@ td[data-level="error"] {
 	}
 
 	/* A row-spanning file drop zone shouldn't stay tall once it's the full width. */
-	.skye-field--file input[type="file"] {
+	.skye-file-upload {
 		min-height: 8rem;
 	}
 

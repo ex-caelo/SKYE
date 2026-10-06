@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import type { FormConfig } from "@skye/form-config";
 import { renderForm } from "../features/form/render/renderForm.js";
+import { registerElements } from "../features/form/registerElements.js";
 import baseConfig from "../shared/sharepoint/fixtures/base-form-config.json" with { type: "json" };
 
 describe("renderForm (using the real base-form-config fixture)", () => {
@@ -341,5 +342,179 @@ describe("renderForm — every field is labelled and identifiable", () => {
     expect(nameInput.value).toBe("Kickoff"); // initialValues won over defaultValue "Untitled"
     expect(getValues().name).toBe("Kickoff");
     expect(getValues().attendees).toEqual(["a", "c"]);
+  });
+
+  it("seeds a file field's preview from an edit-mode initialValues URL string (never onto the real <input>, which can't be seeded)", () => {
+    const config: FormConfig = {
+      list: { id: "list1" },
+      pages: { p1: { title: "P1" } },
+      fields: {
+        poster: { page: "p1", source: "sharepoint", bindTo: "PosterUrl", controlType: "file" },
+      },
+    };
+
+    const { root, getValues } = renderForm(config, document, {
+      initialValues: { poster: "https://contoso.sharepoint.com/sites/luddy/poster.png" },
+    });
+
+    const input = root.querySelector('[data-field-key="poster"]') as HTMLInputElement;
+    expect(input.files?.length ?? 0).toBe(0); // never assigned — browsers don't allow seeding a real file input
+
+    const preview = root.querySelector(".skye-file-upload__preview") as HTMLElement;
+    expect(preview.hidden).toBe(false);
+    expect(preview.querySelector("img.skye-file-upload__thumb")).not.toBeNull();
+    expect(getValues().poster).toBe("https://contoso.sharepoint.com/sites/luddy/poster.png");
+  });
+
+  it("uses filePreviews (a blob URL + real name) for the shown preview while keeping initialValues as the tracked value — a blob URL has no filename/extension of its own to derive either from", () => {
+    const config: FormConfig = {
+      list: { id: "list1" },
+      pages: { p1: { title: "P1" } },
+      fields: {
+        poster: { page: "p1", source: "sharepoint", bindTo: "PosterUrl", controlType: "file" },
+      },
+    };
+
+    const { root, getValues } = renderForm(config, document, {
+      initialValues: { poster: "https://contoso.sharepoint.com/sites/luddy/poster.png" },
+      filePreviews: { poster: { url: "blob:http://localhost/ade1fb08-886b-4f3f-8079-81a1e8ec0000", name: "poster.png" } },
+    });
+
+    const preview = root.querySelector(".skye-file-upload__preview") as HTMLElement;
+    expect(preview.hidden).toBe(false);
+    const img = preview.querySelector<HTMLImageElement>("img.skye-file-upload__thumb");
+    expect(img).not.toBeNull();
+    expect(img!.src).toBe("blob:http://localhost/ade1fb08-886b-4f3f-8079-81a1e8ec0000");
+    expect(preview.querySelector(".skye-file-upload__name")?.textContent).toBe("poster.png");
+    // The tracked value stays the ORIGINAL SharePoint URL — a re-save without touching this
+    // field must resend that, not the local blob: URL, and submitForm.ts's `instanceof File`
+    // upload check is unaffected either way.
+    expect(getValues().poster).toBe("https://contoso.sharepoint.com/sites/luddy/poster.png");
+  });
+
+  it("clicking remove on a seeded file preview clears the field's value (as \"\", not undefined, so a re-save actually clears the column) and hides the preview", () => {
+    const config: FormConfig = {
+      list: { id: "list1" },
+      pages: { p1: { title: "P1" } },
+      fields: {
+        poster: { page: "p1", source: "sharepoint", bindTo: "PosterUrl", controlType: "file" },
+      },
+    };
+
+    const { root, getValues, onChange } = renderForm(config, document, {
+      initialValues: { poster: "https://contoso.sharepoint.com/sites/luddy/poster.png" },
+    });
+
+    let notified = false;
+    onChange(() => {
+      notified = true;
+    });
+
+    const preview = root.querySelector(".skye-file-upload__preview") as HTMLElement;
+    preview.querySelector<HTMLButtonElement>(".skye-file-upload__remove")!.click();
+
+    expect(preview.hidden).toBe(true);
+    expect(getValues().poster).toBe("");
+    expect(notified).toBe(true);
+  });
+
+  it("setFieldValue on a file field shows/clears the preview the same way initialValues does", () => {
+    const config: FormConfig = {
+      list: { id: "list1" },
+      pages: { p1: { title: "P1" } },
+      fields: {
+        poster: { page: "p1", source: "sharepoint", bindTo: "PosterUrl", controlType: "file" },
+      },
+    };
+
+    const { root, setFieldValue, getValues } = renderForm(config, document);
+    const preview = root.querySelector(".skye-file-upload__preview") as HTMLElement;
+    expect(preview.hidden).toBe(true); // nothing seeded yet
+
+    setFieldValue("poster", "https://contoso.sharepoint.com/sites/luddy/poster.png");
+    expect(preview.hidden).toBe(false);
+    expect(getValues().poster).toBe("https://contoso.sharepoint.com/sites/luddy/poster.png");
+
+    setFieldValue("poster", "");
+    expect(preview.hidden).toBe(true);
+    expect(getValues().poster).toBe("");
+  });
+});
+
+describe("renderForm — controlType: 'button' fields", () => {
+  const config: FormConfig = {
+    list: { id: "list1" },
+    pages: { p1: { title: "P1" } },
+    fields: {
+      name: { page: "p1", source: "sharepoint", bindTo: "Title", controlType: "text" },
+      sendReminder: {
+        page: "p1",
+        source: "virtual",
+        controlType: "button",
+        label: "Send Reminder",
+        actions: { notify: { trigger: "onClick", type: "showMessage", message: "Sent." } },
+      },
+    },
+  };
+
+  it("exposes every button field in `buttons`, keyed by field key, with its control/status/config", () => {
+    const { buttons } = renderForm(config, document);
+    expect(Object.keys(buttons)).toEqual(["sendReminder"]);
+    expect(buttons.sendReminder.button.tagName).toBe("BUTTON");
+    expect(buttons.sendReminder.button.textContent).toBe("Send Reminder");
+    expect(buttons.sendReminder.statusEl.tagName).toBe("OUTPUT");
+    expect(buttons.sendReminder.field.actions).toEqual({ notify: { trigger: "onClick", type: "showMessage", message: "Sent." } });
+  });
+
+  it("never appears in getValues() — a button has no value to collect", () => {
+    const { getValues } = renderForm(config, document);
+    expect(getValues()).not.toHaveProperty("sendReminder");
+  });
+
+  it("is excluded from validateAll() — a button is never itself invalid", () => {
+    const { validateAll } = renderForm(config, document);
+    // "name" isn't required here, so the form is valid regardless — this just confirms
+    // validateAll() doesn't choke on / flag the button field itself.
+    expect(validateAll()).toBe(true);
+  });
+});
+
+describe("renderForm — getValues() reflects a custom element's NORMALISED value, not the raw initialValues seed", () => {
+  beforeAll(() => registerElements());
+
+  const config: FormConfig = {
+    list: { id: "list1" },
+    pages: { p1: { title: "P1" } },
+    fields: {
+      host: { page: "p1", source: "sharepoint", bindTo: "Host", controlType: "peoplePicker" },
+    },
+  };
+
+  it("an UNTOUCHED peoplePicker field reads back as a resolvable string[], not the raw seeded SharePoint object", () => {
+    // The real live bug: initialValues seeded `values[fieldKey]` with the raw shape directly, and
+    // it stayed that way until the user happened to re-pick the same person — which is exactly why
+    // "if you re-enter the names again it works" was the original symptom report, and exactly why
+    // a button's own {{fields.host}} action templating (reading getValues() with no normalisation
+    // layer of its own) broke on an untouched field: teams.createChat tried `id.toLowerCase()` on
+    // the raw object and threw, since nothing ever converted it to a string.
+    const { getValues } = renderForm(config, document, {
+      initialValues: { host: { LookupId: 14, LookupValue: "Cloteaux, Lison", Email: "lison@iu.edu" } },
+    });
+    expect(getValues().host).toEqual(["lison@iu.edu"]);
+  });
+
+  it("a multi-value peoplePicker field normalises the same way", () => {
+    const multiConfig: FormConfig = {
+      list: { id: "list1" },
+      pages: { p1: { title: "P1" } },
+      fields: {
+        cohosts: { page: "p1", source: "sharepoint", bindTo: "Cohosts", controlType: "peoplePicker" },
+      },
+    };
+    const { getValues } = renderForm(multiConfig, document, {
+      initialValues: { cohosts: [{ LookupId: 22, LookupValue: "Weyandt, Carley Jane", Email: "" }] },
+    });
+    // Email is blank (a real, documented tenant quirk) — falls through to the numeric LookupId.
+    expect(getValues().cohosts).toEqual(["22"]);
   });
 });

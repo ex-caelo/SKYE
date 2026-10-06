@@ -5,6 +5,8 @@ export interface RecordEngageAttendanceOptions {
   /** Optional — see client.ts's engageFetch docstring (a whitelabeled proxy may inject this itself). */
   apiKey?: string;
   baseUrl?: string;
+  /** Only meaningful when `baseUrl` points at SKYE's own gated BeInvolved proxy (_server/) — sent as that proxy's required X-Skye-Organization-Id header. See client.ts's engageFetch docstring. */
+  organizationId?: number;
   eventId: number;
   userId: EngageUserIdentifier;
   status: "Absent" | "Attended" | "Excused" | "Na";
@@ -36,7 +38,7 @@ export const recordAttendance: ScriptAction = async (args, ctx) => {
       externalIdentifier: options.externalIdentifier,
       swipeCardIdentifier: options.swipeCardIdentifier,
     },
-  });
+  }, options.organizationId);
 
   return { attendanceId: res.id, eventId: res.eventId, status: res.status };
 };

@@ -4,6 +4,8 @@ import { engageFetch, buildReplacePatch, DEFAULT_ENGAGE_BASE_URL } from "./clien
 export interface UpdateEngageAttendanceOptions {
   apiKey?: string;
   baseUrl?: string;
+  /** Only meaningful when `baseUrl` points at SKYE's own gated BeInvolved proxy (_server/) — sent as that proxy's required X-Skye-Organization-Id header. See client.ts's engageFetch docstring. */
+  organizationId?: number;
   eventId: number;
   attendanceId: number;
   status?: "Absent" | "Attended" | "Excused" | "Na";
@@ -42,7 +44,8 @@ export const updateAttendance: ScriptAction = async (args, ctx) => {
     options.baseUrl ?? DEFAULT_ENGAGE_BASE_URL,
     options.apiKey,
     `/v3.0/events/event/${options.eventId}/attendance/${options.attendanceId}`,
-    { method: "PATCH", body: patch }
+    { method: "PATCH", body: patch },
+    options.organizationId
   );
 
   return { attendanceId: res.id, eventId: res.eventId, status: res.status };

@@ -29,8 +29,8 @@ export function humanizeKey(key: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
-/** Best-effort value coercion for an "unknown" (untyped `{}`) schema slot: valid JSON parses to its real type (number/boolean/object/array); anything else is kept as a plain string, so a form author can type either `42` or `Some text` and get what they mean. */
-function coerceUnknown(raw: string): unknown {
+/** Best-effort value coercion for an "unknown" (untyped `{}`) schema slot: valid JSON parses to its real type (number/boolean/object/array); anything else is kept as a plain string, so a form author can type either `42` or `Some text` and get what they mean. Exported so a per-key override (e.g. fieldEditor.ts's `customValidators` raw-JSON textarea) can reuse the identical coercion behavior. */
+export function coerceUnknown(raw: string): unknown {
   if (raw.trim() === "") return undefined;
   try {
     return JSON.parse(raw);
@@ -39,7 +39,7 @@ function coerceUnknown(raw: string): unknown {
   }
 }
 
-function stringifyUnknown(value: unknown): string {
+export function stringifyUnknown(value: unknown): string {
   if (value === undefined || value === null) return "";
   return typeof value === "string" ? value : JSON.stringify(value);
 }

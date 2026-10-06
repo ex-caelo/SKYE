@@ -4,6 +4,8 @@ import { engageFetch, DEFAULT_ENGAGE_BASE_URL } from "./client.js";
 export interface DeleteEngageAttendanceOptions {
   apiKey?: string;
   baseUrl?: string;
+  /** Only meaningful when `baseUrl` points at SKYE's own gated BeInvolved proxy (_server/) — sent as that proxy's required X-Skye-Organization-Id header. See client.ts's engageFetch docstring. */
+  organizationId?: number;
   eventId: number;
   attendanceId: number;
 }
@@ -22,7 +24,7 @@ export const deleteAttendance: ScriptAction = async (args, ctx) => {
 
   await engageFetch(ctx, options.baseUrl ?? DEFAULT_ENGAGE_BASE_URL, options.apiKey, `/v3.0/events/event/${options.eventId}/attendance/${options.attendanceId}`, {
     method: "DELETE",
-  });
+  }, options.organizationId);
 
   return { deleted: true, eventId: options.eventId, attendanceId: options.attendanceId };
 };

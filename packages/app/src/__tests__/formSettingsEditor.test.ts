@@ -78,6 +78,50 @@ describe("renderFormSettingsEditor — form settings + pages", () => {
   });
 });
 
+describe("renderFormSettingsEditor — backView (the \"Back\" nav link's target Custom View)", () => {
+  it("renders a dropdown of the site's real Custom Views when skyeViews is provided", () => {
+    const config = makeConfig();
+    const el = renderFormSettingsEditor(config, () => {}, document, {
+      skyeViews: [
+        { viewId: "llc-events-calendar", title: "LLC Events Calendar" },
+        { viewId: "security-probes", title: "Security Probes" },
+      ],
+    });
+    const row = rowByLabel(el, "Back link")!;
+    const select = row.querySelector("select") as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
+      "— no Back link —",
+      "LLC Events Calendar",
+      "Security Probes",
+    ]);
+
+    select.value = "llc-events-calendar";
+    select.dispatchEvent(new Event("change"));
+    expect(config.backView).toBe("llc-events-calendar");
+  });
+
+  it("falls back to a plain text control when no Custom Views are available", () => {
+    const config = makeConfig();
+    const el = renderFormSettingsEditor(config, () => {}, document);
+    // The fallback is the generic renderPropertyControl, which labels from the schema's own
+    // camelCase key ("backView" -> "Back View"), not the dropdown override's custom "Back link".
+    const row = rowByLabel(el, "Back View")!;
+    expect(row.querySelector("select")).toBeNull();
+    expect(row.querySelector("input")).not.toBeNull();
+  });
+
+  it("shows a current backView value the listing doesn't contain, flagged, instead of silently dropping it", () => {
+    const config: FormConfig = { ...makeConfig(), backView: "deleted-view" };
+    const el = renderFormSettingsEditor(config, () => {}, document, {
+      skyeViews: [{ viewId: "llc-events-calendar", title: "LLC Events Calendar" }],
+    });
+    const row = rowByLabel(el, "Back link")!;
+    const select = row.querySelector("select") as HTMLSelectElement;
+    expect(select.value).toBe("deleted-view");
+    expect(Array.from(select.options).some((o) => o.textContent === "deleted-view (not found)")).toBe(true);
+  });
+});
+
 describe("renderFormSettingsEditor — missing required SharePoint columns", () => {
   it("is not shown without the requiredColumnCheck option", () => {
     const el = renderFormSettingsEditor(makeConfig(), () => {}, document, { listColumns: REQUIRED_COLUMNS });

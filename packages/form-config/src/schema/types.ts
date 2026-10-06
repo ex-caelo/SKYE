@@ -38,6 +38,17 @@ export interface CalculatedExpression {
   separator?: string;
 }
 
+/**
+ * One entry in a field's `customValidators` list: either a bare name (for a
+ * validator that needs no parameters, e.g. "usEinFormat") or a `{ name, args }`
+ * pair for a parameterized, reusable validator (e.g. compareField needs to
+ * know WHICH other field to compare against). `args` is a plain named-options
+ * object — same spirit as a script postAction's args, minus the array
+ * wrapping, since a validator only ever needs one call. See
+ * docs/custom-validators-authoring.md for the full authoring reference.
+ */
+export type CustomValidatorRef = string | { name: string; args?: Record<string, unknown> };
+
 export interface ValidationMessages {
   required?: string;
   minlength?: string;
@@ -66,6 +77,8 @@ export interface FieldConfig {
   helpText?: string;
   defaultValue?: unknown;
   readonly?: boolean;
+  /** Keeps this field editable even when the whole form renders in view mode (which otherwise force-readonlys every field but controlType "button") — see the schema's own doc comment. */
+  alwaysEditable?: boolean;
   appearance?: "default" | "switch";
   options?: Array<{ value: unknown; label?: string }>;
   required?: boolean;
@@ -75,7 +88,7 @@ export interface FieldConfig {
   max?: number;
   pattern?: string;
   matchesField?: string;
-  customValidators?: string[];
+  customValidators?: CustomValidatorRef[];
   validationMessages?: ValidationMessages;
   attributes?: Record<string, unknown>;
   style?: Record<string, unknown>;
@@ -85,6 +98,14 @@ export interface FieldConfig {
   fileStorage?: FileStorage;
   calculatedDisplay?: CalculatedExpression;
   relatedList?: { id: string; siteId?: string; displayField: string };
+
+  // controlType: "button" only — see PostActionTrigger's "onClick" value.
+  /** Required when controlType is "button": this button's own, self-contained action chain — every entry authored with `trigger: "onClick"`. Reuses the exact postAction shape/engine (dependsOn, when, {{results.x}} chaining, all 6 action types), just scoped to this one field instead of a form-wide submit-lifecycle phase. */
+  actions?: Record<string, PostAction>;
+  /** Whether clicking runs `rendered.validateAll()` first and refuses to proceed while any field is invalid — same check Submit already does. Defaults to true; set false for a button whose actions don't depend on the rest of the form being valid yet. */
+  validate?: boolean;
+  /** Optional "are you sure?" confirmation shown before this button's actions run. Omitted = runs immediately on click. */
+  confirm?: { title: string; body: string };
 }
 
 export interface LookupTable {
@@ -111,7 +132,8 @@ export interface PageConfig {
   };
 }
 
-export type PostActionTrigger = "beforeSubmit" | "afterSubmit" | "onSuccess" | "onError";
+/** "onClick" is a button field's own trigger value — see FieldConfig.actions — distinct from the 4 form-submit-lifecycle phases. */
+export type PostActionTrigger = "beforeSubmit" | "afterSubmit" | "onSuccess" | "onError" | "onClick";
 export type PostActionType = "httpRequest" | "graphRequest" | "redirect" | "showMessage" | "setField" | "script";
 
 export interface PostAction {
@@ -142,6 +164,8 @@ export interface FormConfig {
   title?: string;
   description?: string;
   mode?: "create" | "edit" | "both";
+  /** A skye_data/views/ Custom View id this form's "Back" nav link returns to. Omit to hide the Back link. */
+  backView?: string;
   list: { id: string; siteId?: string };
   layout?: { gridTemplateColumns?: number | string; gap?: string };
   pages: Record<string, PageConfig>;
@@ -160,6 +184,7 @@ export interface FormConfigOverlay {
   title?: string;
   description?: string;
   mode?: "create" | "edit" | "both";
+  backView?: string;
   list?: { id?: string; siteId?: string };
   layout?: { gridTemplateColumns?: number | string; gap?: string };
   pages?: Record<string, Partial<PageConfig>>;

@@ -14,6 +14,8 @@ import { updateRsvp as updateEngageRsvp } from "./engage/updateRsvp.js";
 import { recordAttendance as recordEngageAttendance } from "./engage/recordAttendance.js";
 import { updateAttendance as updateEngageAttendance } from "./engage/updateAttendance.js";
 import { deleteAttendance as deleteEngageAttendance } from "./engage/deleteAttendance.js";
+import { formatDateYMD } from "./util/formatDateYMD.js";
+import { formatDateTime } from "./util/formatDateTime.js";
 
 /**
  * The app's full `scriptActions` registry — every "script" postAction a
@@ -40,4 +42,6 @@ export const scriptActions: Record<string, ScriptAction> = {
   "engage.recordAttendance": recordEngageAttendance,
   "engage.updateAttendance": updateEngageAttendance,
   "engage.deleteAttendance": deleteEngageAttendance,
+  "util.formatDateYMD": formatDateYMD,
+  "util.formatDateTime": formatDateTime,
 };

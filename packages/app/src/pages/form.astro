@@ -17,10 +17,28 @@ import Loading from "../components/Loading.astro";
   </div>
 
   <section data-state id="screen-form" hidden>
-    <a class="skye-form__edit-link" data-el="edit-link" hidden></a>
+    <nav class="skye-form__nav" data-slot="form-nav">
+      <a class="skye-form__nav-link" data-el="back-link" hidden></a>
+      <a class="skye-form__nav-link" data-el="edit-entry-link" hidden></a>
+      <a class="skye-form__nav-link" data-el="edit-builder-link" hidden></a>
+    </nav>
     <aside class="skye-form__draft-banner" data-slot="draft-banner" hidden></aside>
     <div data-slot="form-mount"></div>
     <output class="skye-form__status" data-el="status"></output>
+  </section>
+
+  <section class="skye-form__submitted" data-state id="screen-submitted" hidden>
+    <svg xmlns="http://www.w3.org/2000/svg" width="3em" height="3em" viewBox="0 0 24 24">
+      <path d="M0 0h24v24H0z" fill="none" />
+      <path fill="currentColor" d="M12 2C6.486 2 2 6.486 2 12s4.486 10 10 10s10-4.486 10-10S17.514 2 12 2m0 18c-4.411 0-8-3.589-8-8s3.589-8 8-8s8 3.589 8 8s-3.589 8-8 8" />
+      <path fill="currentColor" d="M9.999 13.587L7.7 11.292l-1.412 1.416l3.713 3.705l6.706-6.706l-1.414-1.414z" />
+    </svg>
+    <h2 class="skye-form__submitted-message" data-slot="submitted-message"></h2>
+    <div class="skye-form__submitted-actions">
+      <a class="skye-form__submitted-action" data-el="submitted-back-link" hidden></a>
+      <a class="skye-form__submitted-action" data-el="fill-another-link"></a>
+      <a class="skye-form__submitted-action" data-el="view-response-link"></a>
+    </div>
   </section>
 
   <section data-state id="state-error" hidden>
@@ -31,3 +49,18 @@ import Loading from "../components/Loading.astro";
 
   <script src="../page-scripts/form.ts"></script>
 </BaseLayout>
+
+
+<style>
+  #screen-submitted {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+
+    svg {
+      color: #15803d;
+    }
+  }
+</style>

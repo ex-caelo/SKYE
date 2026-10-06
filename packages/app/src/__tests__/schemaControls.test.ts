@@ -65,15 +65,18 @@ describe("renderPropertyControl", () => {
     expect(value.maxlength).toBe(255);
   });
 
-  it("renders a string-array property (customValidators) from/to a comma-separated text input", () => {
+  it("renders customValidators (mixed bare-name / { name, args } entries) as a raw-JSON textarea", () => {
+    // Each entry can be a bare string OR a { name, args } object (see CustomValidatorRef in
+    // @skye/form-config), so this no longer fits the plain stringArray control — it falls back
+    // to the same raw-JSON editor "unknown"/"condition" kinds already use.
     const prop = propByKey(getFieldSchemaProperties(), "customValidators");
-    const value: Record<string, unknown> = { customValidators: ["a", "b"] };
+    const value: Record<string, unknown> = { customValidators: ["evenLength", { name: "compareField", args: { field: "startTime", operator: "greaterThan" } }] };
     const row = renderPropertyControl(prop, value, () => {}, document);
-    const input = row.querySelector("input") as HTMLInputElement;
-    expect(input.value).toBe("a, b");
-    input.value = "x, y, z";
-    input.dispatchEvent(new Event("input"));
-    expect(value.customValidators).toEqual(["x", "y", "z"]);
+    const textarea = row.querySelector("textarea") as HTMLTextAreaElement;
+    expect(JSON.parse(textarea.value)).toEqual(value.customValidators);
+    textarea.value = '["x", { "name": "y", "args": { "z": 1 } }]';
+    textarea.dispatchEvent(new Event("input"));
+    expect(value.customValidators).toEqual(["x", { name: "y", args: { z: 1 } }]);
   });
 
   it("renders an object-array property (options) with add/remove rows, each a nested object editor", () => {

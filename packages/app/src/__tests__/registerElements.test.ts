@@ -101,6 +101,29 @@ describe("skye-people-picker", () => {
     expect(el.querySelector(".skye-token")!.textContent).toContain("Sam Patel");
     el.remove();
   });
+
+  it("reads back a resolvable string[] from .value even when NEVER re-picked since an edit-mode seed — the real live bug that broke the Luddy approve button's Teams chat", () => {
+    // Before this fix, .value returned whatever raw shape was last SET (a SharePoint
+    // {LookupId, LookupValue, Email} object, or an array of them, for a field an edit-mode form
+    // seeded but the user never touched) — any caller reading .value directly, like a button's
+    // own {{fields.x}} action templating (runButtonActions.ts reads rendered.getValues() with no
+    // normalisation layer of its own), got that raw object. teams.createChat then template-
+    // stringified it straight into a Graph `user@odata.bind` URL as literal "[object Object]",
+    // which Graph rejected with a 400 — exactly the reported failure.
+    const single = document.createElement("skye-people-picker") as HTMLElement & { value: unknown };
+    document.body.appendChild(single);
+    single.value = { LookupId: 14, LookupValue: "Cloteaux, Lison", Email: "lison@iu.edu" };
+    expect(single.value).toEqual(["lison@iu.edu"]);
+    single.remove();
+
+    const multi = document.createElement("skye-people-picker") as HTMLElement & { value: unknown };
+    document.body.appendChild(multi);
+    multi.value = [{ LookupId: 22, LookupValue: "Weyandt, Carley Jane", Email: "" }];
+    // Email is blank (a real, documented tenant quirk) — falls through to the numeric LookupId,
+    // not "" and not "[object Object]".
+    expect(multi.value).toEqual(["22"]);
+    multi.remove();
+  });
 });
 
 describe("skye-multi-select", () => {
@@ -186,6 +209,36 @@ describe("skye-lookup-table", () => {
     expect(rows).toHaveLength(2);
     const firstInput = rows[0].querySelector("input") as HTMLInputElement;
     expect(firstInput.value).toBe("Alex");
+    el.remove();
+  });
+
+  it("a select-controlType column gets a disabled placeholder, so an unset row value doesn't fall back to the first real option", () => {
+    const selectTable: LookupTable = {
+      ...table,
+      columns: {
+        store: {
+          source: "sharepoint",
+          bindTo: "Store",
+          controlType: "select",
+          label: "Store",
+          order: 1,
+          options: [
+            { value: "in-person", label: "In-Person: Kroger" },
+            { value: "online", label: "Online" },
+          ],
+        },
+      },
+    };
+    const el = document.createElement("skye-lookup-table") as HTMLElement & { tableConfig?: LookupTable; value: unknown };
+    el.tableConfig = selectTable;
+    el.value = [{ values: {} }]; // a freshly-added row — no value chosen yet
+    document.body.appendChild(el);
+
+    const select = el.querySelector("tbody tr select") as HTMLSelectElement;
+    expect(select.options).toHaveLength(3);
+    expect(select.options[0].value).toBe("");
+    expect(select.options[0].disabled).toBe(true);
+    expect(select.value).toBe(""); // not "in-person" — the first real option must never be silently defaulted to
     el.remove();
   });
 

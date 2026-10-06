@@ -5,6 +5,8 @@ import type { EngageEventAddress } from "./createEvent.js";
 export interface UpdateEngageEventOptions {
   apiKey?: string;
   baseUrl?: string;
+  /** Only meaningful when `baseUrl` points at SKYE's own gated BeInvolved proxy (_server/) — sent as that proxy's required X-Skye-Organization-Id header. See client.ts's engageFetch docstring. */
+  organizationId?: number;
   eventId: number;
   /**
    * Required on EVERY update, per Engage's own documented behavior — the update endpoint creates
@@ -62,7 +64,9 @@ export const updateEvent: ScriptAction = async (args, ctx) => {
   const res = await engageFetch(ctx, options.baseUrl ?? DEFAULT_ENGAGE_BASE_URL, options.apiKey, `/v3.0/events/event/${options.eventId}`, {
     method: "PATCH",
     body: patch,
-  });
+  }, options.organizationId);
 
-  return { eventId: res.id, name: res.name, startsOn: res.startsOn, endsOn: res.endsOn };
+  // accessCode: see createEvent.ts's own comment on this same field — confirmed present on the
+  // real response via the live OpenAPI spec, not previously passed through.
+  return { eventId: res.id, name: res.name, startsOn: res.startsOn, endsOn: res.endsOn, accessCode: res.accessCode };
 };

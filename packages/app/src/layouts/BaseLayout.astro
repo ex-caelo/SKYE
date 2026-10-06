@@ -20,10 +20,18 @@ const { title, styles = ["/styles/bootstrap.css", "/styles/form.css"] } = Astro.
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
+    <link rel="shortcut icon" href="/favicon.svg" type="image/x-icon">
     {styles.map((href) => <link rel="stylesheet" href={href} />)}
     <slot name="head" />
   </head>
   <body>
+    <a href="/switcher">
+      <picture>
+        <!-- On small viewports the page background is white, where the pale-blue logo disappears — swap to a light-grey copy there. -->
+        <source media="(max-width: 700px)" srcset="/assets/skye_logo_light_grey.svg">
+        <img id="skye-logo" src="/assets/skye_logo.svg" alt="SKYE Logo">
+      </picture>
+    </a>
     <main id="skye-app">
       <slot />
     </main>

@@ -25,7 +25,7 @@ import {
   hashHasFormId,
 } from "../shared/routing.js";
 import { resolveSiteConfig, canEditFormConfigs, SkyeNotConfiguredError } from "../shared/site-config.js";
-import { getCachedTenantId } from "../shared/auth/tenantResolver.js";
+import { resolveApplicationAndTenantId } from "../shared/auth/tenantResolver.js";
 import { completeRedirectReturn } from "../shared/auth/redirectReturn.js";
 
 /**
@@ -38,9 +38,11 @@ import { completeRedirectReturn } from "../shared/auth/redirectReturn.js";
  *                                        otherwise step 2: pick a form or view
  * All screen markup lives in switcher.astro / its components; this script
  * reveals one screen at a time (`showState`) and fills its data-driven
- * parts. Needs SOME applicationId (URL's ?applicationId= or a
- * deploy-configured PUBLIC_DEFAULT_APPLICATION_ID); tenantId is carried the
- * same way with a PUBLIC_DEFAULT_TENANT_ID fallback.
+ * parts. Needs SOME applicationId (URL's ?applicationId=, a
+ * deploy-configured PUBLIC_DEFAULT_APPLICATION_ID, or one this browser last
+ * used successfully); tenantId is resolved the same way, with a
+ * PUBLIC_DEFAULT_TENANT_ID fallback in between — see
+ * shared/auth/tenantResolver.ts's resolveApplicationAndTenantId.
  */
 async function main() {
   // Landing back from an MSAL loginRedirect? Finish it and bounce to the pre-redirect URL
@@ -52,16 +54,20 @@ async function main() {
   const appRoot = document.getElementById("skye-app");
   if (!appRoot) throw new Error('entry-switcher: missing "#skye-app" mount point in the page.');
 
-  const params = new URLSearchParams(window.location.search);
-  const applicationId = params.get("applicationId") ?? import.meta.env.PUBLIC_DEFAULT_APPLICATION_ID;
+  // URL → this deployment's PUBLIC_DEFAULT_APPLICATION_ID/PUBLIC_DEFAULT_TENANT_ID → whichever
+  // ones this browser last used successfully (backfilled into the address bar when recovered —
+  // see resolveApplicationAndTenantId's own doc comment); else auth uses /common and self-heals
+  // for single-tenant apps.
+  const { applicationId, tenantId } = resolveApplicationAndTenantId(window.location.search, {
+    applicationId: import.meta.env.PUBLIC_DEFAULT_APPLICATION_ID,
+    tenantId: import.meta.env.PUBLIC_DEFAULT_TENANT_ID,
+  });
   if (!applicationId) {
     showState(appRoot, "state-config-missing");
     return;
   }
 
-  // URL → PUBLIC_DEFAULT_TENANT_ID → a tenant id a previous sign-in on this browser cached
-  // (see lib/auth/tenantResolver.ts); else auth uses /common and self-heals for single-tenant apps.
-  const tenantId = params.get("tenantId") ?? import.meta.env.PUBLIC_DEFAULT_TENANT_ID ?? getCachedTenantId(applicationId) ?? undefined;
+  const params = new URLSearchParams(window.location.search);
   const siteId = params.get("siteId") ?? undefined;
   const pendingViewId = params.get("view") ?? undefined;
   const hash = window.location.hash;

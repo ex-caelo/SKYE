@@ -19,6 +19,8 @@ describe("scriptActions registry", () => {
       "teams.createChat",
       "teams.scheduleMeeting",
       "teams.sendMessage",
+      "util.formatDateTime",
+      "util.formatDateYMD",
     ]);
   });
 

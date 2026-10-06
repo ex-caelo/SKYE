@@ -6,6 +6,9 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 
+_server
+skye_data
+
 # turbo
 .turbo
 
@@ -162,3 +165,7 @@ packages/app/_drive-form.mjs
 packages/app/_drive-switcher.mjs
 
 packages/app/_drive-full.mjs
+skye_data/forms/luddy-llc-event-proposal/form.config.json
+skye_data/forms/luddy-llc-event-proposal/README.md
+skye_data/forms/luddy-llc-event-proposal/admin/form.config.json
+ 

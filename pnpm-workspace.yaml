@@ -8,5 +8,6 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - '@vitest/mocker@5.0.0'
   - '@vitest/spy@5.0.0'
-  - astro@7.3.1
+  - astro@7.3.1 || 7.3.4
   - vitest@5.0.0
+  - '@astrojs/markdown-satteri@0.4.2'

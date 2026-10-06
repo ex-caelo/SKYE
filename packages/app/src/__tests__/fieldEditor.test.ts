@@ -58,4 +58,26 @@ describe("renderFieldEditor", () => {
     select.dispatchEvent(new Event("change"));
     expect((field as unknown as Record<string, unknown>).page).toBe("review");
   });
+
+  it("controlType 'button' renders the dedicated, always-shown actions editor (not the generic presence-toggled dictionary)", () => {
+    const field = { controlType: "button", label: "Send Reminder" } as FieldConfig & Record<string, unknown>;
+    const el = renderFieldEditor(field, () => {}, document, { scriptActionNames: ["teams.sendMessage"] });
+
+    const heading = Array.from(el.querySelectorAll("h4")).find((h) => h.textContent === "Actions (run on click)");
+    expect(heading).toBeTruthy();
+    // No presence-toggle checkbox for `actions` — it's shown directly, and field.actions is
+    // initialized to {} the moment the editor renders (not left undefined).
+    expect(field.actions).toEqual({});
+
+    const addRow = heading!.nextElementSibling!.querySelector(".skye-builder__phase-add")!;
+    (addRow.querySelector("input") as HTMLInputElement).value = "notify";
+    (addRow.querySelector("button") as HTMLButtonElement).click();
+    expect((field.actions as Record<string, { trigger?: string }>).notify.trigger).toBe("onClick");
+  });
+
+  it("a non-button controlType still gets the generic presence-toggled dictionary editor for 'actions' (unused, but not special-cased away)", () => {
+    const field: FieldConfig = { controlType: "text" };
+    const el = renderFieldEditor(field as FieldConfig & Record<string, unknown>, () => {}, document, {});
+    expect(Array.from(el.querySelectorAll("h4")).some((h) => h.textContent === "Actions (run on click)")).toBe(false);
+  });
 });

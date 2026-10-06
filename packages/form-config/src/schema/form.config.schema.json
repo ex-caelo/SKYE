@@ -18,6 +18,10 @@
       "default": "both",
       "description": "Whether this config applies when creating a new list item, editing an existing one, or both. Editing is signalled at runtime by an itemId being present."
     },
+    "backView": {
+      "type": "string",
+      "description": "The id of a skye_data/views/ Custom View this form's \"Back\" nav link returns to — e.g. a calendar or dashboard view that links INTO this form (see docs/custom-views-authoring.md). Omit to hide the Back link entirely."
+    },
     "list": {
       "type": "object",
       "required": ["id"],
@@ -237,15 +241,21 @@
             "peoplePicker", "lookupPicker", "lookupTable",
             "url", "file",
             "calculatedDisplay",
-            "heading", "paragraph", "divider", "hidden"
+            "heading", "paragraph", "divider", "hidden",
+            "button"
           ],
-          "description": "How this field is rendered. Values match native HTML input types wherever one exists (text/number/date/datetime-local/url/file/checkbox/radio/hidden), so anyone who knows HTML recognizes them directly. 'checkbox' covers both a plain checkbox and a toggle-switch look \u2014 see `appearance`. 'file' covers both generic uploads and image uploads \u2014 restrict to images via `attributes.accept: \"image/*\"`. For 'sharepoint' fields, if controlType is omitted, SKYE infers a default from the live column's Graph data type. 'heading'/'paragraph'/'divider' are content-only and require source: 'virtual'. 'lookupTable' renders an editable data table backed by a related SharePoint list — see `table`. 'hidden' is the direct equivalent of <input type=\"hidden\">: present, submits a value, never shown \u2014 use it instead of trying to visually hide a normal control."
+          "description": "How this field is rendered. Values match native HTML input types wherever one exists (text/number/date/datetime-local/url/file/checkbox/radio/hidden), so anyone who knows HTML recognizes them directly. 'checkbox' covers both a plain checkbox and a toggle-switch look \u2014 see `appearance`. 'file' covers both generic uploads and image uploads \u2014 restrict to images via `attributes.accept: \"image/*\"`. For 'sharepoint' fields, if controlType is omitted, SKYE infers a default from the live column's Graph data type. 'heading'/'paragraph'/'divider' are content-only and require source: 'virtual'. 'lookupTable' renders an editable data table backed by a related SharePoint list — see `table`. 'button' is a real <button> that runs its own `actions` chain on click — independent of form submission; requires source: 'virtual' — see `actions`/`validate`/`confirm`. 'hidden' is the direct equivalent of <input type=\"hidden\">: present, submits a value, never shown \u2014 use it instead of trying to visually hide a normal control."
         },
         "label": { "type": "string", "description": "Overrides the column's displayName; also the heading text when controlType is 'heading'." },
         "subtitle": { "type": "string" },
         "helpText": { "type": "string" },
         "defaultValue": {},
         "readonly": { "type": "boolean", "default": false, "description": "Matches the HTML `readonly` attribute both in name and meaning." },
+        "alwaysEditable": {
+          "type": "boolean",
+          "default": false,
+          "description": "Keeps this one field editable even when the whole form is rendered in view mode, which otherwise force-readonlys every field except controlType 'button' (an app-level render flag, not stored in the saved item). For a value that exists only to feed a button's own `actions` on click — e.g. a reviewer typing the host's email as part of clicking \"Approve\" while otherwise just viewing the record — and is never itself persisted (typically a virtual field with no `bindTo`). Does not affect create/edit mode, where every field is already editable regardless of this flag; only relevant alongside at least one `button` field on the same page."
+        },
         "appearance": {
           "enum": ["default", "switch"],
           "default": "default",
@@ -271,8 +281,21 @@
         "matchesField": { "type": "string", "description": "SKYE-specific, no native HTML equivalent: value must equal another field's value, referenced by field key (e.g. a 'confirm email' field)." },
         "customValidators": {
           "type": "array",
-          "items": { "type": "string" },
-          "description": "SKYE-specific, no native HTML equivalent: names of validator functions, for logic too custom to express declaratively. These names are keyed against a hardcoded, reviewed registry that ships in the SKYE app source \u2014 config files never supply or reference executable code fetched from SharePoint. A name with no matching registry entry is a config error at load time, not a silent no-op."
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "required": ["name"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": { "type": "string" },
+                  "args": { "type": "object", "description": "Named options passed to the validator function as its third argument. Shape is specific to each validator \u2014 see docs/custom-validators-authoring.md." }
+                }
+              }
+            ]
+          },
+          "description": "SKYE-specific, no native HTML equivalent: entries reference validator functions, for logic too custom to express declaratively (a field-to-field comparison, a check against the current date, cross-field \"at least one of\" rules, ...). Each entry is either a bare name (a parameterless validator) or `{ name, args }` (a parameterized one, e.g. compareField needs to know which other field to compare against). Names are keyed against a hardcoded, reviewed registry that ships in the SKYE app source \u2014 config files never supply or reference executable code fetched from SharePoint. A name with no matching registry entry is a config error at load time, not a silent no-op. See docs/custom-validators-authoring.md for the full list and examples."
         },
         "validationMessages": { "$ref": "#/$defs/validationMessages" },
 
@@ -294,6 +317,27 @@
             "siteId": { "type": "string", "description": "Optional, if the related list lives on a different site than this form's primary list." },
             "displayField": { "type": "string", "description": "Internal `name` of the related list's column to display as each search result's label, e.g. \"Title\"." }
           }
+        },
+        "actions": {
+          "type": "object",
+          "description": "Required when controlType is 'button': this button's own, self-contained flow of actions, run on click. Same dict shape and merge rationale as the form-root `postActions` (author-chosen action keys, additive overlay-friendly), reusing the exact same postAction shape/engine — dependsOn ordering, `when` guards, {{results.actionKey.path}} chaining, all 6 action types. Every entry here must set `trigger: \"onClick\"`; dependsOn is scoped to this dict only, not the form-root postActions (a button's actions never depend on, or get depended on by, anything outside its own `actions`).",
+          "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$" },
+          "additionalProperties": { "$ref": "#/$defs/postAction" }
+        },
+        "validate": {
+          "type": "boolean",
+          "default": true,
+          "description": "Only meaningful when controlType is 'button'. Whether clicking requires the rest of the form to pass validation first (the same check Submit already runs) before this button's actions run. Set false for a button whose actions don't depend on other fields being filled in/valid yet."
+        },
+        "confirm": {
+          "type": "object",
+          "required": ["title", "body"],
+          "additionalProperties": false,
+          "description": "Only meaningful when controlType is 'button'. If present, shows a confirm dialog (title + body) before running this button's actions; omitted means the actions run immediately on click.",
+          "properties": {
+            "title": { "type": "string" },
+            "body": { "type": "string" }
+          }
         }
       },
       "allOf": [
@@ -302,7 +346,7 @@
           "then": { "required": ["bindTo"] }
         },
         {
-          "if": { "properties": { "controlType": { "enum": ["heading", "paragraph", "divider"] } } },
+          "if": { "properties": { "controlType": { "enum": ["heading", "paragraph", "divider", "button"] } } },
           "then": { "properties": { "source": { "const": "virtual" } } }
         },
         {
@@ -316,6 +360,10 @@
         {
           "if": { "properties": { "controlType": { "const": "lookupPicker" } } },
           "then": { "required": ["relatedList"] }
+        },
+        {
+          "if": { "properties": { "controlType": { "const": "button" } } },
+          "then": { "required": ["actions", "label"] }
         }
       ]
     },
@@ -420,7 +468,7 @@
       "required": ["trigger", "type"],
       "description": "A single post-submit action. Actions within the same trigger phase can depend on one another via dependsOn, and can reference each other's outputs via {{results.<actionKey>.<path>}} template placeholders. The primary SharePoint list item created/updated by the form itself is available separately as {{item.<path>}} (e.g. {{item.id}}), distinct from {{results.<actionKey>...}} which holds a specific postAction's own output.",
       "properties": {
-        "trigger": { "enum": ["beforeSubmit", "afterSubmit", "onSuccess", "onError"] },
+        "trigger": { "enum": ["beforeSubmit", "afterSubmit", "onSuccess", "onError", "onClick"], "description": "The 4 submit-lifecycle phases, or \"onClick\" for an action nested under a button field's own `actions` (see the `field` $def) — never mix the two: a form-root `postActions` entry should never use \"onClick\", and a button's own `actions` entries should always use it." },
         "when": { "$ref": "#/$defs/condition", "description": "Optional guard; action only runs if this condition is true." },
         "dependsOn": {
           "type": "array",

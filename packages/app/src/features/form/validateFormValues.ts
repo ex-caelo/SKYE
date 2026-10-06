@@ -1,4 +1,4 @@
-import type { FormConfig, FieldValues } from "@skye/form-config";
+import type { FormConfig, FieldValues, CustomValidatorFn } from "@skye/form-config";
 import { validateField, runCustomValidators, evaluateCondition } from "@skye/form-config";
 
 export interface FieldValidationError {
@@ -6,8 +6,8 @@ export interface FieldValidationError {
   message: string;
 }
 
-/** controlTypes with nothing a user actually types/picks — never worth validating. */
-const CONTENT_ONLY_CONTROL_TYPES = new Set(["heading", "paragraph", "divider", "calculatedDisplay"]);
+/** controlTypes with nothing a user actually types/picks — never worth validating. "button" has its own separate validation call (rendered.validateAll(), gated by field.validate) fired on click, not here — this is about this field ITSELF never having a value to check, same as the others in this set. */
+const CONTENT_ONLY_CONTROL_TYPES = new Set(["heading", "paragraph", "divider", "calculatedDisplay", "button"]);
 
 /**
  * Runs every applicable field's native (required/minlength/maxlength/min/
@@ -22,7 +22,7 @@ const CONTENT_ONLY_CONTROL_TYPES = new Set(["heading", "paragraph", "divider", "
  * submit path still doesn't run field validation before writing to
  * SharePoint (see TODO §17's "known gaps").
  */
-export function validateFormValues(config: FormConfig, values: FieldValues, customValidatorRegistry: Record<string, (value: unknown, allValues: FieldValues) => true | string> = {}): FieldValidationError[] {
+export function validateFormValues(config: FormConfig, values: FieldValues, customValidatorRegistry: Record<string, CustomValidatorFn> = {}): FieldValidationError[] {
   const errors: FieldValidationError[] = [];
 
   for (const [fieldKey, field] of Object.entries(config.fields)) {

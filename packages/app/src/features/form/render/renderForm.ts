@@ -4,6 +4,7 @@ import { renderField, type RenderedField } from "./renderField.js";
 import { getControlDefinition } from "./fieldRegistry.js";
 import { applyPageLayout } from "./layoutEngine.js";
 import { validateFormValues } from "../validateFormValues.js";
+import { renderFilePreview } from "./fileUploadZone.js";
 
 export interface RenderedForm {
   root: HTMLElement;
@@ -13,6 +14,14 @@ export interface RenderedForm {
   onChange: (cb: (values: FieldValues) => void) => void;
   /** The submit button — entry-form.ts (or whatever's orchestrating submission) attaches its own click handler; renderForm doesn't know about Graph/postActions. */
   submitButton: HTMLButtonElement;
+  /**
+   * Every `controlType: "button"` field, keyed by field key — same "renderForm builds the DOM,
+   * the caller wires the actual click behavior" split as submitButton above (renderForm doesn't
+   * know about Graph/postActions/runButtonActions either). `button`/`statusEl` are exactly
+   * renderField's own `control`/`buttonStatusEl` for that field; `field` is its FieldConfig, so
+   * the caller has `field.actions`/`validate`/`confirm` without a second lookup.
+   */
+  buttons: Record<string, { button: HTMLButtonElement; statusEl: HTMLElement; field: FormConfig["fields"][string] }>;
   /** Switches the active page tab — exposed so a caller that rebuilds this form from scratch (e.g. /builder's live preview) can restore whichever page was showing before the rebuild, instead of always resetting to the first one. */
   showPage: (pageKey: string) => void;
   /** The currently active page's key, if any pages exist. */
@@ -58,6 +67,22 @@ export interface RenderFormOptions {
    * controls so people pickers / multi-selects show the saved data.
    */
   initialValues?: FieldValues;
+  /**
+   * `controlType: "file"` fields only — an already-resolved preview to
+   * show INSTEAD of trying to render `initialValues[key]` (a raw URL
+   * string, e.g. a SharePoint webUrl a browser can't load cross-origin)
+   * directly. `initialValues[key]` itself must stay the original saved
+   * URL regardless — that's what an unmodified submit re-sends, and
+   * swapping it for a blob URL there would make submitForm.ts think a
+   * new file needs uploading (its `instanceof File` check would still
+   * say no, but the persisted value would become a worthless local blob:
+   * URL instead of the real one). `name` is required because a blob URL
+   * has no filename of its own to derive one from — see page-scripts/form.ts,
+   * the only current populator of this, which fetches the bytes via
+   * Graph (a raw cross-origin SharePoint URL 401s/CORS-fails as an `<img
+   * src>`) and captures the real name from the URL before replacing it.
+   */
+  filePreviews?: Record<string, { url: string; name: string }>;
 }
 
 /** Reads a control's current value using the accessor its field registry entry declares. */
@@ -165,7 +190,60 @@ export function renderForm(config: FormConfig, document: Document, options: Rend
     );
   }
 
+  /**
+   * The shared "a field's value just changed, for a real reason (a user
+   * edit, or removing an existing file preview)" side-effect sequence —
+   * factored out so the per-field change listener below and a file
+   * field's remove button (wired from renderForm, not fileUploadZone,
+   * since only renderForm has `values`/`recomputeVisibility`/etc. in
+   * scope) run identically rather than drifting apart.
+   */
+  function commitFieldValue(fieldKey: string, newValue: unknown): void {
+    values[fieldKey] = newValue;
+    recomputeVisibility();
+    recomputeCalculatedFields();
+    // An edit invalidates any external error (they're re-checked on the next submit anyway) —
+    // so a "not a site member" warning clears the moment the user removes/changes that pick.
+    if (externalErrors.size > 0) externalErrors.clear();
+    updateValidationDisplay();
+    changeListeners.forEach((cb) => cb(values));
+  }
+
+  /**
+   * Shows or clears a `controlType: "file"` field's preview from a
+   * non-File value (a saved item's URL string, or undefined to clear) —
+   * used for edit/view-mode seeding and `setFieldValue`, neither of which
+   * can hand a real `File` to the native input (browsers don't allow
+   * programmatically populating one). The preview's own remove button
+   * routes back through `commitFieldValue` with `""` (not `undefined`) so
+   * a subsequent save actually clears the bound column rather than
+   * silently resending the old value — `JSON.stringify` drops an
+   * `undefined` property entirely, `""` doesn't.
+   */
+  function applyFilePreviewValue(
+    fieldKey: string,
+    entry: { field: (typeof config.fields)[string]; rendered: RenderedField },
+    value: unknown,
+    previewOverride?: { url: string; name: string }
+  ): void {
+    const previewEl = entry.rendered.filePreviewEl;
+    if (!previewEl) return;
+    const onRemove = () => {
+      commitFieldValue(fieldKey, "");
+      renderFilePreview(previewEl, undefined, document, () => {}); // hide the preview itself — commitFieldValue only tracks the value
+    };
+    if (previewOverride) {
+      // Already known to be an image — that's the one condition page-scripts/form.ts fetches a
+      // preview for at all (see filePreviews's own docs on RenderFormOptions).
+      renderFilePreview(previewEl, previewOverride.url, document, onRemove, { name: previewOverride.name, isImage: true });
+      return;
+    }
+    const source = typeof value === "string" && value ? value : undefined;
+    renderFilePreview(previewEl, source, document, onRemove);
+  }
+
   const fieldEntries = Object.entries(config.fields).sort(([, a], [, b]) => (a.order ?? Infinity) - (b.order ?? Infinity));
+  const buttons: RenderedForm["buttons"] = {};
 
   for (const [fieldKey, field] of fieldEntries) {
     const pageContainer = field.page ? pageContainers.get(field.page) : undefined;
@@ -182,29 +260,26 @@ export function renderForm(config: FormConfig, document: Document, options: Rend
     pageContainer.appendChild(rendered.container);
     renderedFields.set(fieldKey, { field, rendered });
 
+    if (field.controlType === "button") {
+      // rendered.buttonStatusEl always exists for controlType "button" — see renderField.ts.
+      buttons[fieldKey] = { button: rendered.control as HTMLButtonElement, statusEl: rendered.buttonStatusEl!, field };
+    }
+
     if (field.defaultValue !== undefined) values[fieldKey] = field.defaultValue;
 
     const def = getControlDefinition(field.controlType);
     for (const eventName of def.changeEvents) {
       rendered.control.addEventListener(eventName, () => {
-        if (field.controlType === "file") {
-          // File inputs use valueAccessor "none" (readControlValue doesn't handle them) — capture the
-          // selected File object directly; submitForm.ts's upload step looks for a File instance here.
-          values[fieldKey] = (rendered.control as HTMLInputElement).files?.[0];
-        } else {
-          values[fieldKey] = readControlValue(rendered.control, def.valueAccessor);
-        }
-        recomputeVisibility();
-        recomputeCalculatedFields();
-        // An edit invalidates any external error (they're re-checked on the next submit anyway) —
-        // so a "not a site member" warning clears the moment the user removes/changes that pick.
-        if (externalErrors.size > 0) externalErrors.clear();
+        // File inputs use valueAccessor "none" (readControlValue doesn't handle them) — capture the
+        // selected File object directly; submitForm.ts's upload step looks for a File instance here.
+        // (fileUploadZone.ts's own "change" listener, wired at render time, handles this event's
+        // preview update separately — this listener only needs to track the value itself.)
+        const newValue = field.controlType === "file" ? (rendered.control as HTMLInputElement).files?.[0] : readControlValue(rendered.control, def.valueAccessor);
         // Only actually re-renders this field's message if it's already touched — an untouched
         // field typing its very first character doesn't suddenly flash an error (see
         // updateValidationDisplay's own docstring), but a field the user has already blurred once
         // gets its error cleared/updated live as they keep correcting it.
-        updateValidationDisplay();
-        changeListeners.forEach((cb) => cb(values));
+        commitFieldValue(fieldKey, newValue);
       });
     }
   }
@@ -340,13 +415,48 @@ export function renderForm(config: FormConfig, document: Document, options: Rend
   root.appendChild(submitButton);
 
   // Edit / view mode: seed the existing item's values onto the form (overriding any defaultValue),
-  // and push them into the controls so people pickers and multi-selects render the saved data.
+  // and push them into the controls so people pickers and multi-selects render the saved data. A
+  // `file` field can't be seeded onto its real <input> (no browser allows populating one
+  // programmatically) — it gets the same preview UI a fresh pick shows instead, built directly
+  // from the saved URL string rather than a File.
   if (options.initialValues) {
     for (const [fieldKey, value] of Object.entries(options.initialValues)) {
       if (value === undefined) continue;
-      values[fieldKey] = value;
       const entry = renderedFields.get(fieldKey);
-      if (entry) writeControlValue(entry.rendered.control, getControlDefinition(entry.field.controlType).valueAccessor, value);
+      if (entry?.field.controlType === "file") {
+        // A file field is exempt from the read-back below by necessity, not just convenience —
+        // see RenderFormOptions.filePreviews's own doc comment: a file <input> can't be seeded
+        // programmatically at all, so there's no normalised control value to read back, and
+        // `values[fieldKey]` staying the original saved URL string is what an unmodified submit
+        // is actually supposed to re-send.
+        values[fieldKey] = value;
+        applyFilePreviewValue(fieldKey, entry, value, options.filePreviews?.[fieldKey]);
+        continue;
+      }
+      if (!entry) {
+        values[fieldKey] = value; // no matching rendered field (e.g. a stale/removed config key) — nothing to normalise against
+        continue;
+      }
+      writeControlValue(entry.rendered.control, getControlDefinition(entry.field.controlType).valueAccessor, value);
+      // For a CUSTOM element (skye-people-picker, skye-multi-select, ...) — tagName check matches
+      // writeControlValue's own distinction above — read its value back rather than trusting the
+      // raw seed as-is. A real, live bug this fixes: a peoplePicker's raw seed can be the actual
+      // SharePoint `{LookupId, LookupValue, Email}` shape (or an array of them), which
+      // writeControlValue normalises into the control's own internal state (its `set value`), but
+      // the `values` cache here used to just keep that raw, un-normalised shape forever — until
+      // the user happened to re-pick the same person, which is exactly why "if you re-enter the
+      // names again it works" was the original symptom. Any caller reading this form's values
+      // (checkPersonFieldsResolve, the submit encoder, a button's own {{fields.x}} action
+      // templating via rendered.getValues()) now sees what the control itself would report, not a
+      // stale pre-normalisation snapshot. Deliberately NOT done for a plain native input/select:
+      // its `.value` is always a string, so reading it back would silently turn a numeric seed
+      // (e.g. a Number/Currency column's raw JS number) into a string in the cache, a real type
+      // regression native controls don't actually need this fix for — writeControlValue already
+      // only stringifies for DISPLAY there, the raw seed stays correct to keep as-is.
+      const isCustomElement = entry.rendered.control.tagName.includes("-");
+      values[fieldKey] = isCustomElement
+        ? readControlValue(entry.rendered.control, getControlDefinition(entry.field.controlType).valueAccessor)
+        : value;
     }
   }
 
@@ -364,20 +474,14 @@ export function renderForm(config: FormConfig, document: Document, options: Rend
     root,
     getValues: () => ({ ...values }),
     setFieldValue: (key, value) => {
-      values[key] = value;
       const entry = renderedFields.get(key);
-      if (entry) {
-        const def = getControlDefinition(entry.field.controlType);
-        writeControlValue(entry.rendered.control, def.valueAccessor, value);
-      }
-      if (externalErrors.size > 0) externalErrors.clear(); // an edit invalidates any external error — re-checked at submit
-      recomputeVisibility();
-      recomputeCalculatedFields();
-      updateValidationDisplay();
-      changeListeners.forEach((cb) => cb(values));
+      if (entry?.field.controlType === "file") applyFilePreviewValue(key, entry, value);
+      else if (entry) writeControlValue(entry.rendered.control, getControlDefinition(entry.field.controlType).valueAccessor, value);
+      commitFieldValue(key, value);
     },
     onChange: (cb) => changeListeners.push(cb),
     submitButton,
+    buttons,
     showPage,
     getActivePageKey: () => activePageKey,
     validateAll: () => {

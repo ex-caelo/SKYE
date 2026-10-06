@@ -35,6 +35,7 @@ import calendarJs from "./fixtures/views/calendar/view.js?raw";
 import probesHtml from "./fixtures/views/security-probes/view.html?raw";
 import probesCss from "./fixtures/views/security-probes/view.css?raw";
 import probesJs from "./fixtures/views/security-probes/view.js?raw";
+import singleFileDemoHtml from "./fixtures/views/single-file-demo/view.html?raw";
 
 /** In-memory simulated document library, keyed by (driveId, path) — good enough to exercise upload logic without a real drive. */
 const driveStore = new Map<string, { driveItemId: string; webUrl: string }>();
@@ -130,6 +131,8 @@ const KNOWN_LISTS = new Set<string>(["list1", "guests-list", "66742a26-e579-4314
 const MOCK_VIEWS: Record<string, SkyeViewFiles> = {
   calendar: { html: calendarHtml, css: calendarCss, js: calendarJs },
   "security-probes": { html: probesHtml, css: probesCss, js: probesJs },
+  // No view.css/view.js at all — everything (including the <script>) lives in view.html itself.
+  "single-file-demo": { html: singleFileDemoHtml, css: "", js: "" },
 };
 
 /** A 1x1 transparent PNG — what the mock returns for any skye.image() request. */
@@ -309,14 +312,23 @@ export class MockGraphClient implements GraphClient {
     return delay(item);
   }
 
-  async createListItem(siteId: string, listId: string, fields: Record<string, unknown>): Promise<GraphListItem> {
+  // `options` (preferBetaApiVersion) only affects a real request's headers — nothing for this
+  // in-memory mock to simulate, so it's accepted (for interface compatibility) and ignored.
+  async createListItem(siteId: string, listId: string, fields: Record<string, unknown>, _options?: { preferBetaApiVersion?: boolean }): Promise<GraphListItem> {
     const id = String(nextId++);
     const item: GraphListItem = { id, fields, etag: `"${id}"` };
     getStore(siteId, listId).set(id, item);
     return delay(item);
   }
 
-  async updateListItem(siteId: string, listId: string, itemId: string, fields: Record<string, unknown>, ifMatchEtag?: string): Promise<GraphListItem> {
+  async updateListItem(
+    siteId: string,
+    listId: string,
+    itemId: string,
+    fields: Record<string, unknown>,
+    ifMatchEtag?: string,
+    _options?: { preferBetaApiVersion?: boolean }
+  ): Promise<GraphListItem> {
     const store = getStore(siteId, listId);
     const existing = store.get(itemId);
     if (!existing) throw new Error(`MockGraphClient: no fixture item with id "${itemId}" in list "${listId}".`);
@@ -368,7 +380,9 @@ export class MockGraphClient implements GraphClient {
   async searchPeople(query: string): Promise<PersonResult[]> {
     const needle = query.trim().toLowerCase();
     const results = needle
-      ? (peopleFixture as PersonResult[]).filter((p) => p.displayName.toLowerCase().includes(needle))
+      ? (peopleFixture as PersonResult[]).filter(
+          (p) => p.displayName.toLowerCase().includes(needle) || p.email?.toLowerCase().includes(needle)
+        )
       : (peopleFixture as PersonResult[]);
     return delay(results.slice(0, 10));
   }
@@ -384,6 +398,17 @@ export class MockGraphClient implements GraphClient {
     );
     if (person) return delay(Number(person.id.replace(/\D/g, "")) || 1);
     return delay(identifier.includes("@") ? 99 : null);
+  }
+
+  async getCurrentUser(): Promise<{ email?: string }> {
+    return delay({ email: "mock.viewer@example.edu" });
+  }
+
+  async resolveSiteUserEmail(_siteId: string, lookupId: number): Promise<string | null> {
+    // Inverse of resolveSiteUserId's own derivation above: find the fixture person whose "person-N"
+    // id number matches, and return their email — same deterministic stand-in idea.
+    const person = (peopleFixture as PersonResult[]).find((p) => Number(p.id.replace(/\D/g, "")) === lookupId);
+    return delay(person?.email ?? null);
   }
 
   async searchLookupItems(siteId: string, listId: string, displayField: string, query: string): Promise<LookupItemResult[]> {

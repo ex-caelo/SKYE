@@ -51,4 +51,29 @@ describe("runCustomValidators", () => {
     const field: FieldConfig = { controlType: "text", customValidators: ["doesNotExist"] };
     expect(() => runCustomValidators(field, "x", {}, {})).toThrow(/not registered/);
   });
+
+  it("passes a { name, args } entry's args through as the validator's third argument", () => {
+    const field: FieldConfig = {
+      controlType: "text",
+      customValidators: [{ name: "minWordCount", args: { min: 2 } }],
+    };
+    const registry = {
+      minWordCount: (v: unknown, _allValues: Record<string, unknown>, args?: Record<string, unknown>) =>
+        String(v).trim().split(/\s+/).length >= (args?.min as number) ? true : "Not enough words.",
+    };
+    expect(runCustomValidators(field, "one two", {}, registry).valid).toBe(true);
+    expect(runCustomValidators(field, "one", {}, registry)).toEqual({ valid: false, message: "Not enough words." });
+  });
+
+  it("mixes bare-name and { name, args } entries in the same list, checked in order", () => {
+    const field: FieldConfig = {
+      controlType: "text",
+      customValidators: ["usEinFormat", { name: "minWordCount", args: { min: 5 } }],
+    };
+    const registry = {
+      usEinFormat: (v: unknown) => (/^\d{2}-\d{7}$/.test(String(v)) ? true : "Must look like an EIN."),
+      minWordCount: (): true => true,
+    };
+    expect(runCustomValidators(field, "not-an-ein", {}, registry)).toEqual({ valid: false, message: "Must look like an EIN." });
+  });
 });

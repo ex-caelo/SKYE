@@ -8,7 +8,8 @@ export interface GraphListColumn {
   /** Internal SharePoint column name (e.g. "Favourite_x0020_Campus") — what a field's `bindTo` targets. */
   name: string;
   displayName: string;
-  columnType: "text" | "note" | "number" | "currency" | "boolean" | "dateTime" | "choice" | "lookup" | "personOrGroup" | "hyperlinkOrPicture";
+  /** "thumbnail" is Graph's own name (columnDefinition.thumbnail) for the newer "Image" column type — distinct from "hyperlinkOrPicture" (the classic Hyperlink/Picture column). Neither is writable via Graph's `/fields` endpoint (confirmed against a live tenant) — encodeSharePointFields.ts detects both to report a clear error instead of attempting a write that's confirmed to fail. */
+  columnType: "text" | "note" | "number" | "currency" | "boolean" | "dateTime" | "choice" | "lookup" | "personOrGroup" | "hyperlinkOrPicture" | "thumbnail";
   required?: boolean;
   /** True for computed/system columns (Created, Modified, …) — a form can't write these, so the builder skips them when binding fields or checking required-column coverage. */
   readOnly?: boolean;
@@ -201,9 +202,26 @@ export interface GraphClient {
    */
   listSiteLists(siteId: string): Promise<SkyeListSummary[]>;
   getListItem(siteId: string, listId: string, itemId: string, select?: string[]): Promise<GraphListItem>;
-  createListItem(siteId: string, listId: string, fields: Record<string, unknown>): Promise<GraphListItem>;
-  /** `ifMatchEtag` enables optimistic concurrency — omit only for a first-time create-then-immediately-edit flow. Throws EtagConflictError on mismatch. */
-  updateListItem(siteId: string, listId: string, itemId: string, fields: Record<string, unknown>, ifMatchEtag?: string): Promise<GraphListItem>;
+  /**
+   * `options.preferBetaApiVersion` sends `Prefer: apiversion=2.1` on this
+   * one request — needed to write a "hyperlinkOrPicture" column's
+   * structured `{ Url, Description }` value (see lookupTableRows.ts,
+   * which sets this whenever a row includes one), per Microsoft's own
+   * confirmed guidance for that column type. Deliberately NOT sent on
+   * every write — it routes the request through a newer, still-evolving
+   * internal API surface, so it's scoped to only the writes that
+   * actually need it.
+   */
+  createListItem(siteId: string, listId: string, fields: Record<string, unknown>, options?: { preferBetaApiVersion?: boolean }): Promise<GraphListItem>;
+  /** `ifMatchEtag` enables optimistic concurrency — omit only for a first-time create-then-immediately-edit flow. Throws EtagConflictError on mismatch. `options` — see createListItem. */
+  updateListItem(
+    siteId: string,
+    listId: string,
+    itemId: string,
+    fields: Record<string, unknown>,
+    ifMatchEtag?: string,
+    options?: { preferBetaApiVersion?: boolean }
+  ): Promise<GraphListItem>;
   deleteListItem(siteId: string, listId: string, itemId: string): Promise<void>;
   searchListItems(siteId: string, listId: string, query: ListItemQuery): Promise<ListItemPage>;
 
@@ -217,6 +235,21 @@ export interface GraphClient {
    * Person-column encoding (see submit/encodeSharePointFields.ts).
    */
   resolveSiteUserId(siteId: string, identifier: string): Promise<number | null>;
+  /**
+   * The inverse of resolveSiteUserId: given a site User Information List
+   * item id (the numeric `LookupId` a `personOrGroup` column's value
+   * carries), resolves a real email/UPN for that person — usable as a
+   * Microsoft Graph user identifier (e.g. a Teams chat member), unlike the
+   * LookupId itself, which only means anything to SharePoint. Needed
+   * because that list's own `EMail` field is often blank until the person
+   * has actually visited SharePoint (see resolveSiteUserId's own doc
+   * comment) — this falls back to that same item's `UserName`/`Name`
+   * (claims login) fields, which are more reliably populated. Returns null
+   * if nothing resolvable was found. Backs `backfillPersonEmails.ts`.
+   */
+  resolveSiteUserEmail(siteId: string, lookupId: number): Promise<string | null>;
+  /** The signed-in viewer's email/UPN (Graph `/me`) — backs `{{currentUser.email}}` placeholders in field defaults. */
+  getCurrentUser(): Promise<{ email?: string }>;
   /** Backs the lookupPicker control — searches a specific related list's items, using `displayField` as each result's label. */
   searchLookupItems(siteId: string, listId: string, displayField: string, query: string): Promise<LookupItemResult[]>;
 

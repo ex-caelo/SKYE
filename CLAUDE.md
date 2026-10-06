@@ -82,6 +82,107 @@ outside of a sandboxed environment.
      the existing `dependsOn` + `{{results.actionKey.path}}` chaining
      (see `teams.createChat` → `teams.sendMessage` for the pattern) — no
      new orchestration logic needed for a multi-step service action.
+  **A `script` action doesn't have to touch a network at all** —
+  `src/integrations/util/formatDateYMD.ts` ("util.formatDateYMD",
+  `src/integrations/util/`) is the first purely-computational one,
+  built because the templating engine (`{{namespace.path}}`) has no
+  date-formatting/transform syntax of its own — a config needing a date
+  reformatted (e.g. a Teams chat topic prefixed `"YYYY.MM.DD "`) has to
+  compute it via an actual action, chained in with `dependsOn` +
+  `{{results.x.ymd}}` same as any other. Same recipe as a
+  Graph/Teams/Engage action, just with no `ctx.graphFetch`/
+  `ctx.httpFetch` call inside it at all — the four-step recipe above
+  still applies unchanged, "network access" was never actually a
+  requirement of it.
+  **`graphJson.ts`'s thrown error includes the response BODY, not just
+  the status line** (`Graph request to "<path>" failed: <status>
+  <statusText> — <body, truncated to 300 chars>`) — a real, live
+  diagnosability gap found and fixed chasing an unexplained `/chats`
+  400 (`engage/client.ts`'s `engageFetch` already did this correctly;
+  `graphJson.ts` was the one helper that didn't, reporting nothing but
+  a bare status code for every Graph-backed `script` action's failure).
+  Graph's actual `error.code`/`error.message` lives in the body — never
+  assume a bare status line is the full story when debugging one of
+  these actions; read the console's full error text first.
+  **That fix immediately surfaced a real bug it had been hiding**:
+  `teams.createChat`'s `/chats` 400 turned out to be Graph's own
+  `"Duplicate chat members is specified in the request body."` — a
+  config combining several people-picker fields into one
+  `memberUserIds` list (the Luddy approve button's
+  `["{{fields.host}}", "{{fields.cohosts}}", "{{fields.reviewer}}"]`,
+  where the reviewer field's own helpText says "pick yourself") can
+  easily produce the same person twice. `createChat.ts` now
+  deduplicates `memberUserIds` case-insensitively before building the
+  request (keeping the first occurrence), and computes the
+  `"oneOnOne"` vs `"group"` `chatType` auto-detection from the
+  deduplicated count, not the raw one. Overlap between a form's
+  people-picker fields is an expected, legitimate case this action
+  needs to handle — not a config-authoring mistake to avoid.
+  **Fixing THAT immediately surfaced a THIRD, deeper bug in the same
+  chain**: the very next retry got past the dedup fix and hit a new,
+  much less obvious failure — a `403` with Graph's own `"OperationFailed
+  ... One or more members cannot be added to the thread roster,"`
+  naming no specific id. Root cause: `{{fields.host}}` (still used in
+  `memberUserIds` at that point) falls back to its SharePoint
+  `personOrGroup` column's own numeric `LookupId` whenever that
+  column's cached `Email` is blank — a real, common SharePoint quirk
+  this file already documents elsewhere (see "People-picker values"
+  above) — and a SharePoint LookupId is a COMPLETELY DIFFERENT id space
+  from a Microsoft Graph user id: valid for writing a SharePoint
+  `<col>LookupId`, meaningless to Graph's `/users/{id}` lookup. The
+  Luddy admin config already had a field built exactly to avoid this —
+  `hostEmail`, a manually-entered field whose own helpText says "the
+  people picker on Metrics stores a directory ID, not an email
+  address," already used for Engage's `submittedById` — but
+  `memberUserIds` had never actually been switched to use it. **Fixed
+  two ways**: (1) `teams.createChat` now validates every `memberUserIds`
+  entry looks like a real Graph identifier (contains `@`, or matches a
+  GUID) BEFORE sending, throwing a specific, actionable error naming
+  the bad value if not — turning a future instance of this exact
+  mistake, in ANY config, into a loud and diagnosable failure instead
+  of Graph's opaque roster-rejection 403; (2) the Luddy admin config's
+  3 `memberUserIds` lists (both approve branches + the deny-branch
+  chat) now read `{{fields.hostEmail}}` instead of `{{fields.host}}`,
+  matching what the form's own README already claimed the design was.
+  **General lesson for any future config binding a people-picker field
+  into something that needs a Graph user identifier (Teams chat
+  members, `sendMail` recipients, etc.)**: don't trust a SharePoint
+  `personOrGroup` field's own value for this — its Email can be blank
+  and its id-shaped fallback is SharePoint-internal, not Graph-
+  compatible. Bind to a field guaranteed to carry a real email/UPN
+  instead (a manually-entered email field, like `hostEmail` here).
+  **Superseded for `cohosts` by a systemic fix, since the
+  "add a manual workaround field" pattern doesn't scale to a
+  multi-value field**: the VERY NEXT retry hit the exact same failure
+  mode again, this time on a cohost (`"1012"`) — `hostEmail` only
+  covers the single `host` field, and there's no equivalent manual
+  field a multi-value `cohosts` picker could be swapped for. Asked the
+  user how to close this gap for good; they chose resolving a real
+  email via an extra Graph lookup over either a new manual field or
+  dropping cohosts from the chat. **`GraphClient.resolveSiteUserEmail(
+  siteId, lookupId)`** (new — `graphClient.ts`, mirrors
+  `resolveSiteUserId`'s own existing User Information List lookup, just
+  inverted: given the numeric id, fetches that list item directly and
+  pulls a usable email out of `EMail` first, then `UserName` if
+  email-shaped, then `Name`'s claims-login format
+  (`i:0#.f|membership|<upn>`) — the same three fields
+  `resolveSiteUserId`'s own matching logic already treats as reliable,
+  so trusting them here is consistent, not a new assumption). New
+  **`features/form/submit/backfillPersonEmails.ts`** (pure except for
+  an injected `resolveEmail` callback, matching
+  `mapSharePointFieldsToValues.ts`'s own no-Graph-access contract) walks
+  every peoplePicker field's seeded value and, for any entry with a
+  blank/missing `Email`, resolves and fills one in — called from
+  `page-scripts/form.ts` right after `mapSharePointFieldsToValues`, so
+  by the time ANY downstream code (`personIdentifier`, a button's
+  `{{fields.x}}` templating, `teams.createChat`'s own validation) sees
+  the value, it already has a real Graph-compatible email whenever one
+  exists. Mocked in `MockGraphClient` as the inverse of its own existing
+  `resolveSiteUserId` fixture-derived numbering. This is now the primary
+  fix for the whole class of bug; `hostEmail` stays in the Luddy config
+  (unaffected, not reverted) since it's also still needed for Engage's
+  `submittedById` and remains a reasonable belt-and-braces override for
+  the one field it covers.
 - **Overlays are additive-only.** A `[permission]/form.config.json` overlay
   may add pages/fields/postActions or loosen an existing constraint; it must
   never remove something a lower permission level sees, or make a
@@ -117,6 +218,51 @@ outside of a sandboxed environment.
   throws `SkyeNotConfiguredError` if the site has no Site Assets library.
   `listSkyeForms`/`listSkyeViews` treat a 404 on `skye_data/forms|views` as
   "none" (a fresh install may have `skye_data/config` but not those folders).
+  **Real bug, found and fixed against a live tenant**: `findSiteAssetsListId`
+  (the 3-tier fallback above) had been committed with its actual body
+  commented out and stubbed to `return null`, plus leftover debug
+  `console.log`s in `resolveSiteAssetsDrive` — a leftover from an earlier
+  live-debugging pass against this exact code that was never restored. On
+  a tenant/site where the fast-path `$filter` query doesn't surface the
+  Site Assets list, this made `resolveSiteAssetsDrive` unconditionally
+  return `null`, so `skyeItemPath` threw `SkyeNotConfiguredError` even
+  when `skye_data/config/skye.config.json` genuinely existed and was
+  reachable — a misleading "SKYE isn't set up here" error on a site that
+  actually was set up. Invisible to the test suite because `mockGraphClient.ts`
+  doesn't implement (or need) this Graph-specific list-resolution dance at
+  all, so it could only ever surface against a real tenant — exactly the
+  gap this file's "Untested against a live tenant" note already flagged.
+  Fixed by restoring the real fallback body and removing the debug logs;
+  no behavior change from what this section already documented as the
+  intended 3-tier resolution.
+  **A second, deeper layer of the same bug class, found when the first
+  fix alone didn't resolve a live repro**: `siteAssetsDriveId`'s session
+  cache wrapped `resolveSiteAssetsDrive(siteId)` in a blanket
+  `.catch(() => null)` — so even with the fallback tiers genuinely
+  restored, a REAL Graph error hit while resolving the drive (403
+  Forbidden because this app's per-site `Sites.Selected` grant doesn't
+  cover that site, a network failure, a 500 — anything that isn't the
+  400/404 "this particular list truly doesn't exist" shape the tiers
+  already special-case) got silently collapsed into `null` too, which
+  `skyeItemPath` then reported as the exact same misleading
+  `SkyeNotConfiguredError`. `hasSkyeConfig` right below it already had
+  the correct pattern for this ("a 403 here is a real access problem,
+  not 'no config' — let it surface") — `siteAssetsDriveId` just didn't
+  follow it. Fixed by dropping that blanket catch so a real error
+  propagates all the way to the console (`form.ts`'s `main().catch`
+  already logs the full error object) instead of being reported as "not
+  set up"; `installSkyeSiteConfig`'s own direct call site
+  (`siteAssetsDriveId` isn't only reached via `skyeItemPath`) now wraps
+  the call itself and converts a 403 into its existing
+  `SkyeInstallError("forbidden", …)` path, matching how every other
+  error in that function is already handled — `hasSkyeConfig` needed no
+  change, since it already let a driveId-resolution error propagate
+  the same way. **If you hit `SkyeNotConfiguredError` again after this
+  fix, check the browser console for the real underlying error it now
+  surfaces** — most likely a 403 meaning this app's `Sites.Selected`
+  grant hasn't been extended to cover that specific site yet (a
+  per-site grant, not tenant-wide — see "Real-tenant Graph permissions"
+  below), not a genuinely-missing Site Assets library.
   `getListItemImage` / `uploadToLibrary` address other drives directly and
   are unaffected.
 - **If the site has no Site Assets library, SKYE can't create it** —
@@ -216,6 +362,241 @@ fills its data-driven regions — it does not build markup with
   queries is present in the source — a rename on one side without the
   other fails there.
 
+## Date/time values: Graph always returns UTC; a `date`/`datetime-local` control always needs local time
+
+**A real live-tenant bug, found from a user report**: `/form` showed the
+wrong time for an existing item's `dateTime` field — an event entered as
+18:00 (America/Indiana/Indianapolis, EDT/UTC-4) displayed back as 22:00
+in edit/view mode, while the Custom Views calendar showed the correct
+18:00 for the exact same stored item. Root cause:
+`mapSharePointFieldsToValues.ts`'s `trimDateForControl` (the function
+that seeds an edit/view-mode form's `date`/`datetime-local` inputs from a
+loaded item's raw Graph `fields`) just regex-sliced the UTC digits
+straight out of Graph's ISO string (`"2026-10-01T22:00:00Z"` →
+`"2026-10-01T22:00"`) and dropped them into the control unconverted — a
+`datetime-local` control always interprets whatever string it's given as
+the viewer's OWN local wall-clock time, so the raw UTC hour showed up as
+if it were already local. The Custom Views calendar
+(`skye_data/views/*/view.html`) never had this bug, because it always
+parses with `new Date(f.StartTime)` and reads back local components for
+display — exactly the fix applied here too: `trimDateForControl` now
+does `new Date(value)` and builds the control's string from that `Date`
+object's LOCAL getters (`getFullYear`/`getMonth`/`getDate`/`getHours`/
+`getMinutes`), which is the real UTC→local conversion, not a string
+slice. 1 test in `mapSharePointFieldsToValues.test.ts` pins `TZ =
+"America/Indiana/Indianapolis"` for the exact live repro (22:00 UTC must
+show as 18:00, not 22:00) — scoped with `afterEach` restoring the
+original `process.env.TZ` immediately, since `vitest.config.ts`'s `pool:
+"threads"` (see "Toolchain versions") shares one process across test
+files, so an unrestored env mutation here could otherwise leak into
+unrelated files.
+
+**The write side (`encodeSharePointFields.ts`) was NOT touched, and
+appears to already be correct** — it passes a `datetime-local` input's
+raw local-time string straight through to Graph with no explicit
+timezone conversion of its own, and yet the stored value round-trips
+correctly (confirmed: the calendar view, reading the same stored UTC
+value, already showed the right local time). This is Graph/SharePoint's
+own server-side behavior: a `dateTime` column written without an
+explicit offset is evidently interpreted using the SharePoint site's
+regional-settings timezone, not assumed-UTC, and converted to UTC for
+storage from there — not something this app's code does explicitly. This
+is implicit, Graph-side behavior this app currently just relies on
+rather than controls; if a site's regional timezone setting is ever
+unset/wrong, or just doesn't match viewers' actual local timezone, write
+could silently drift the same way read used to — flagged here as a
+known, unverified assumption rather than something being "fixed" without
+evidence it's actually broken.
+
+## People-picker values: an untouched edit-mode chip must still resolve, not just a freshly-picked one
+
+**A real live-tenant bug, found from a user report with a screenshot**:
+editing an EXISTING item and submitting WITHOUT touching its Host/Cohosts
+people-picker field failed with "`<name>` is not a member of this site"
+— for a host who plainly, actually was a member — with the Cohosts field
+showing an even more obviously-broken `"[object Object] is not a member
+of this site"`. Re-picking the exact same person from the search dropdown
+and submitting again worked. Two independent, compounding bugs, both
+rooted in the same gap: SKYE's own `skye-people-picker`'s `.value`
+getter returns whatever raw shape it was last SET to — a user re-picking
+a person calls `commit()`, which writes a clean `string[]` of resolvable
+keys (email, or a numeric LookupId `graph.resolveSiteUserId`'s own fast
+path already special-cases — see that method's own comment), but an
+UNTOUCHED edit-mode field's `.value` is still exactly whatever raw Graph
+shape `mapSharePointFieldsToValues` originally seeded it with, since
+nothing ever called `commit()` on it.
+
+- **Bug 1 — `checkPersonFieldsResolve.ts` (the pre-submit "is this still
+  a site member" gate) and `encodeSharePointFields.ts`'s `personOrGroup`
+  write branch both did a naive `.map(String)`** on whatever
+  `values[fieldKey]` held, instead of extracting a resolvable identifier
+  from it. A raw SharePoint person object stringifies to literally
+  `"[object Object]"` (Cohosts, a multi-value column — Graph always
+  returns these as an array of full `{LookupId, LookupValue, Email}`
+  objects), which obviously can't resolve. **Fix**: a new shared
+  `features/form/submit/personIdentifier.ts` — `personIdentifier(entry)`
+  extracts email, then numeric `LookupId`, then a generic `id`, mirroring
+  the SAME priority `registerElements.ts`'s `normalisePeopleValue`
+  already used for chip rendering (the two had drifted: one did this
+  correctly for DISPLAY, the other did it naively for RESOLUTION) — now
+  reused by all three call sites (`checkPersonFieldsResolve.ts`,
+  `encodeSharePointFields.ts`, and `normalisePeopleValue` itself), so
+  they can't drift apart again. Along the way, fixed a second, subtler
+  bug this surfaced: the priority chain used `??`, which does NOT skip a
+  PRESENT-but-blank string — and `graphClient.ts`'s own
+  `doResolveSiteUserId` comment already documents that `EMail` is "often
+  blank (it's only filled once the user has actually visited
+  SharePoint)" on this exact tenant. `personIdentifier` now explicitly
+  skips an empty-string candidate and falls through to the next one
+  (e.g. `LookupId`) instead of returning `""`.
+- **Bug 2 — `mapSharePointFieldsToValues.ts`'s own doc comment had been
+  WRONG about what Graph actually returns** for a SINGLE-value
+  `personOrGroup` column: it assumed Graph always gives the full
+  `{LookupId, LookupValue}` object once the column is in `$select` (true
+  for a MULTI-value column), but a real tenant response instead gave
+  just the bare display-name STRING under `Host` (`"Cloteaux, Lison"`) —
+  with NO `LookupId`/`Email` anywhere on it, even though
+  `selectColumnsForEditPrefill` already separately selects
+  `HostLookupId` alongside it. No amount of fixing Bug 1 alone could
+  recover from this — the resolvable id was never attached to `values`
+  in the first place. **Fix**: `mapSharePointFieldsToValues` now rebuilds
+  a bare-string single-value person into `{LookupId, LookupValue: <the
+  string>}` using that separately-selected `<bindTo>LookupId` companion,
+  the same shape the multi-value case already naturally has — so Bug 1's
+  fix has something resolvable to extract from either shape.
+- **4 new tests** reproduce the exact live repro values (`"Cloteaux,
+  Lison"` / `"Weyandt, Carley Jane"`, an empty-string `Email`) across
+  `checkPersonFields.test.ts`, `encodeSharePointFields.test.ts` (×1 each,
+  the untouched-value resolves-correctly case), and
+  `mapSharePointFieldsToValues.test.ts` (×2 — the bare-string rebuild,
+  and the "no LookupId companion at all -> left alone" edge case). Both
+  test files' `GraphClient` stubs were also fixed to mirror the real
+  client's own numeric-identifier fast path (previously only modeled a
+  known-email map, which doesn't reflect how an edit-mode LookupId
+  actually resolves).
+
+**None of the above was actually the full fix — the real root cause
+was one layer deeper, in `renderForm.ts` itself, found only after a
+LATER live retry still failed** (a button's `{{fields.host}}` action
+templating threw `TypeError: id.toLowerCase is not a function` on an
+untouched field, even after every fix above). `renderForm.ts`'s
+`getValues()` doesn't read live `.value` off each control at all — it
+returns a snapshot of an internal `values` cache, refreshed only on an
+explicit `skye-change` event (the user interacting with that field) or
+`setFieldValue`. The edit-mode seeding loop set this cache directly
+from the RAW seed (`values[fieldKey] = value`) and separately pushed
+that same raw value onto the control via `writeControlValue` — so the
+control's own internal state became correctly normalised (and its
+`.value` getter, per the fix above, would report it correctly if read
+directly), but the CACHE kept the raw shape forever, completely
+bypassing every normalisation fix above, until the user happened to
+re-pick the same person and trigger a `skye-change` event. This is
+exactly why the ORIGINAL report was "if you re-enter the names again it
+works" — every fix up to this point addressed real bugs in HOW a value
+gets normalised once read, but missed that `getValues()` — what
+`checkPersonFieldsResolve`/the submit encoder/a button's own
+`{{fields.x}}` templating ALL actually call — reads the cache, not the
+control. **Fix**: the seeding loop now calls `writeControlValue` first,
+then — for a CUSTOM element specifically (`tagName.includes("-")`,
+matching `writeControlValue`'s own existing distinction) — reads the
+control's value BACK via `readControlValue` and stores THAT in the
+cache, instead of the raw seed. Deliberately scoped to custom elements
+only: blindly doing this for a plain native `<input>` would silently
+turn a cached Number/Currency column's JS number into a string
+(`.value` on a native input is always a string) — a real regression
+risk caught before it shipped. `file` fields are unaffected (unchanged,
+pre-existing special case — see `RenderFormOptions.filePreviews`'s own
+doc comment). 2 new tests in `renderForm.test.ts`. **Lesson for next
+time a "stale until re-interacted" bug shows up**: check whether a
+value is read from a live control getter or from `renderForm.ts`'s own
+`values` cache first — the cache, not the control, is what most real
+callers actually see.
+
+## `/form`'s top-of-page nav: Back / Edit Entry / Edit Form in Builder
+
+Three independent `<a>` links in `pages/form.astro`'s `<nav data-slot="form-nav">`, each shown
+only when it applies — no single "nav bar" concept to toggle as a whole, just three conditions
+wired separately in `page-scripts/form.ts`:
+
+- **`data-el="back-link"`** ("← Back") — shown only when the merged `FormConfig` sets
+  `backView: "<a skye_data/views/ id>"`, a new top-level schema property (both
+  `form.config.schema.json` and the overlay schema — overlay behaves like `title`: a plain scalar,
+  last-wins). Links to `buildViewUrl(...)`. Omitted (not just hidden) when a form has no
+  `backView` set — there's no generic "previous page" to fall back to, since `/form` can be
+  reached directly (a shared link, a bookmark) with nothing meaningful in browser history.
+- **`data-el="edit-entry-link"`** ("Edit Entry") — shown only in `route.mode === "view"`, linking
+  to the same item in edit mode (`buildFormUrl(..., "edit", route.itemId)`). Not permission-gated
+  at the app level, same reasoning as everywhere else in this repo: SharePoint's own ACLs decide
+  whether the edit actually succeeds, this is just a navigation shortcut.
+- **`data-el="edit-builder-link"`** ("Edit Form in Builder") — the pre-existing "Edit in Builder"
+  link (renamed from `data-el="edit-link"` for consistency with the two new ones above, both
+  `.astro`/`.ts`/`astroMarkupHooks.test.ts` updated together), unchanged logic: only for a
+  signed-in user `canEditFormConfig` says can actually edit this site's form configs (a real site
+  owner/editor check, not everyone), and never shown for a draft preview.
+
+**Builder support for `backView` follows this repo's established "surface real selectable data,
+don't make an author hand-type an id" rule** (same reasoning as the list/script-action pickers
+elsewhere in the builder): `formSettingsEditor.ts`'s new `renderBackViewControl(views)` renders a
+`<select>` of the site's REAL Custom Views (`graph.listSkyeViews(siteId)`, fetched once into
+`BuilderState.skyeViews` alongside `listColumns`, threaded through `renderFormSettingsEditor`'s
+existing `options` pattern — the exact same shape `scriptActionNames`/`listColumns` already use)
+instead of a free-text box for a view id nobody should need to memorize. Falls back to the
+generic free-text control when the site has no Custom Views yet (an empty dropdown would be
+worse than a text box); a current `backView` value the listing doesn't contain (a deleted view,
+or one on another site) is shown flagged `"<id> (not found)"` rather than silently dropped, same
+pattern as an unregistered `functionName`. No extra wiring needed beyond that one override —
+`backView` is a plain top-level schema property, so `getFormTopLevelProperties()` already surfaces
+it in the settings editor automatically.
+
+**A real, live bug: the post-submit splash screen's "Fill out another
+response" link could silently do nothing.** After a CREATE-mode submit,
+the address bar stays on `#formId/new` forever — the splash screen
+(`showSubmittedSplash`) is purely a JS state swap; nothing ever
+navigates. "Fill out another response" ALSO targets `#formId/new` —
+so clicking it from a page whose hash is ALREADY `#formId/new` isn't a
+navigation at all from the browser's own perspective: the hash genuinely
+isn't changing, so not even a `hashchange` event fires, and this file's
+own `hashchange` -> `reload()` mechanism (see the top of this file) never
+gets a chance to run. It looked like the link did nothing because by that
+point it truly had nothing left to do. **Fix, two parts**:
+1. `showSubmittedSplash` now calls `history.replaceState(...)` to point
+   the address bar at the just-saved item in view mode (the same URL
+   "View submitted response" already links to) — more accurate anyway
+   (the user really is now looking at a saved item, not "still on the
+   create screen"), and makes "Fill out another response"'s target a
+   genuinely different hash again.
+2. That alone only moves the bug onto "View submitted response" (now
+   THAT link can coincide with the just-replaced URL) — so a new
+   `forceReloadIfAlreadyThere(link)` helper is attached to BOTH splash
+   links unconditionally: on click, if `link.href === window.location.href`
+   (the one case a plain `<a>` click can never produce a real navigation),
+   it `preventDefault()`s and calls `window.location.reload()` directly,
+   bypassing the `hashchange` mechanism entirely since it's already known
+   not to fire. Scoped to just these two links — none of the three nav
+   links above can ever coincide with the current URL (`/view`/`/builder`
+   are different pages entirely; "Edit Entry"'s hash never matches
+   view mode's own), so they don't need the same guard.
+
+**"Back" also shows on the post-submit splash screen, not just the live
+form.** `showState` hides `#screen-form` (and the top-of-page nav living
+inside it, including "Back") completely when `#screen-submitted` takes
+over — the original `back-link` element doesn't just scroll out of view,
+it's genuinely gone from the visible DOM. A second `data-el=
+"submitted-back-link"` lives inside `#screen-submitted`'s own
+`.skye-form__submitted-actions` (alongside "Fill out another response"/
+"View submitted response", same `.skye-form__submitted-action` styling
+class, so it's visually consistent for free) and `showSubmittedSplash`
+wires it with the identical `buildViewUrl(..., merged.backView)` href the
+main nav's own back-link uses. One real gotcha hit building this: TS
+doesn't carry an outer `const`'s property-narrowing (`if (merged.backView)`)
+into a NESTED function body at all — `showSubmittedSplash` needed its own
+local `const backView = merged.backView;` before the `if`, same reason
+`route.siteId`/`route.applicationId` are read through the function's
+OWN already-destructured `siteId`/`applicationId` locals (see that
+function's own top-of-file comment) rather than `route.*` directly —
+using `route.*` inside this specific nested function silently fails the
+EXACT same way, a mistake made and caught by `tsc` while building this.
+
 ## Custom Views (`src/features/custom-views/`, `pages/view.astro`)
 
 Author-written HTML/CSS/JS "views" (calendars, dashboards) in
@@ -234,7 +615,17 @@ Non-negotiable invariants (do not weaken without explicit sign-off):
 - **The frame's `srcdoc` contains nothing author-written** — only the CSP
   meta, SKYE's own `src/styles/view.css` (`?raw`), and `view-runtime.js`
   (`?raw`). The three view files arrive later over the port and are installed
-  via `innerHTML`/`textContent`/`AsyncFunction`.
+  via `innerHTML`/`textContent`/`AsyncFunction`. `view.css`/`view.js` are both
+  optional now (`RealGraphClient.getSkyeViewFiles`) — an author can write a
+  single `view.html` with its own `<style>`/`<script>` instead of three
+  files. This doesn't weaken the invariant above: a `<script>` element
+  `innerHTML` inserts is permanently inert per the DOM spec regardless (true
+  on any web page, not a SKYE rule), so `view-runtime.js`'s `mount()` just
+  pulls that already-dead text back out and runs it through the exact same
+  `AsyncFunction` call a separate `view.js` already used — no new execution
+  path, just a second source for the one that existed. A `<style>` element
+  `innerHTML` inserts already takes effect on its own (unlike `<script>`),
+  so that half needed no code change at all.
 - **Frame CSP stays `default-src 'none'`** (+ `'unsafe-inline'`/`'unsafe-eval'`
   for the runtime, `img-src data:`). The `/view` page itself carries
   `frame-src 'self'`.
@@ -658,6 +1049,301 @@ not just get a look-alike CSS class.
   both packages** (up from 367 — 82 in `@skye/form-config`, 287 in
   `@skye/app`), both type-check clean, Astro production build verified.
 
+## Button fields (`controlType: "button"`) — a field with its own action chain
+
+A form field can be a real `<button>` that runs its own, self-contained
+flow of actions on click — the same postAction engine/action-type
+vocabulary (`httpRequest`/`graphRequest`/`redirect`/`showMessage`/
+`setField`/`script`, `dependsOn` waves, `{{fields.x}}`/`{{item.x}}`/
+`{{results.x}}` templating) the form-root `postActions` dict already
+uses for submit-lifecycle phases, just scoped to one field instead of a
+form-wide trigger. Not a variant of Submit — no SharePoint primary-item
+write happens automatically; an action that needs to write somewhere
+(`graphRequest`/`script`) does it itself, exactly like a postAction
+already can, with no restriction on it touching the primary item's own
+list (a "quick approve" button that PATCHes `Status` directly, separate
+from a full Submit, is an intended, supported use).
+
+- **`field.actions: Record<string, PostAction>`** — required when
+  `controlType` is `"button"` (`source: "virtual"` is required too, same
+  as `heading`/`paragraph`/`divider`). Every entry is authored with
+  `trigger: "onClick"` — a real, schema-valid `PostActionTrigger` value
+  (not a form-submit phase), and the one thing
+  `src/features/form/submit/runButtonActions.ts` (in `@skye/app`) filters
+  by when it calls the exact same `runTriggerPhase()` engine function
+  `submitForm.ts` uses. `dependsOn` is scoped to this one
+  field's own `actions` dict only — a button's actions never depend on,
+  or get depended on by, the form-root `postActions` or another button's
+  actions.
+- **`field.validate?: boolean`** (default `true`) — whether clicking
+  requires `rendered.validateAll()` to pass first, same check Submit
+  already runs, before this button's actions run. Set `false` for a
+  button whose actions don't depend on the rest of the form being valid
+  yet (e.g. a "test this webhook" button).
+- **`field.confirm?: { title: string; body: string }`** — optional
+  "are you sure?" gate before the actions run, reusing the same
+  `showConfirmDialog` component the draft-preview submit gate already
+  uses. Omitted means the actions run immediately on click.
+- **Wired in `page-scripts/form.ts`, not `renderForm.ts`** — same split
+  as `submitButton` (`renderForm.ts`'s own doc comment: "entry-form.ts
+  attaches its own click handler; renderForm doesn't know about
+  Graph/postActions"). `renderForm()` returns `buttons: Record<fieldKey,
+  {button, statusEl, field}>`; `form.ts` wires each one's click →
+  validate (if `field.validate !== false`) → confirm (if `field.confirm`)
+  → `runButtonActions()`, with `showMessage` routed to that button's own
+  `statusEl` (an `<output>` beside the button — `renderField.ts`'s
+  `buttonStatusEl`) so multiple buttons on one form never stomp on each
+  other's status text.
+- **`{{item.x}}` uses the same shape submitForm.ts's postActions already
+  give** — real SharePoint column names (`item.Title`, not
+  `item.eventTitle`), id first, built once in `form.ts` from the loaded
+  edit-mode item's raw `fields` (not the field-key-mapped
+  `initialValues`) — `{}` in create mode, where there's genuinely no item
+  yet, matching `beforeSubmit`'s own item context.
+- **Stays clickable in view mode, unlike every other control.** `view`
+  mode force-sets every OTHER field's `readonly` (an app-level render
+  flag, not a schema concept — see this file's own TODO §3 note), but
+  `controlType: "button"` is deliberately excluded from that loop:
+  `readonly` protects a *value* from being changed, which a button
+  doesn't have, and a button's whole point can be a "quick action" a
+  viewer takes without switching to edit mode (an approver clicking
+  "Approve" while just viewing an item). `fieldRegistry.ts`'s `button`
+  entry doesn't read `field.readonly` at all for this reason.
+- **Builder support**: `getFieldSchemaProperties()` already includes
+  `actions`/`validate`/`confirm` for every field's editor, the same way
+  `table`/`fileStorage`/`calculatedDisplay` already do for THEIR
+  controlTypes (plain top-level `field` properties, not gated behind an
+  `allOf` discriminator) — `"button"` is picked up automatically by the
+  `+ Add field` controlType dropdown too, since that list is derived
+  straight from the schema's `controlType` enum
+  (`page-scripts/builder.ts`'s `CONTROL_TYPES`). `features/builder/fieldEditor.ts`
+  overrides `actions` specifically for `controlType: "button"` (falls
+  through to the generic presence-toggled dictionary editor for every
+  other controlType, same as an unused `fileStorage`/`table` already
+  does) with `features/builder/buttonActionsEditor.ts` — a parallel,
+  simplified version of `formSettingsEditor.ts`'s wave-grouped Post
+  Actions editor, reusing its exported `computeWaves`/
+  `renderFunctionNameControl` directly, minus the 4-way trigger-phase
+  grouping (a button has exactly one implicit "phase": its own click, so
+  every entry in its `actions` dict is already scoped to it by
+  construction — no phase to choose or move between, and `trigger` is
+  fixed, never shown as an editable control). The live preview
+  (`builderPreview.ts`) needs no special handling at all: it never wires
+  button click behavior (only the real `form.ts` does), and its existing
+  root-level delegated click listener (every rendered control has
+  `data-field-key`) already treats a button click as "select this field
+  for editing," the same as clicking any other field — exactly the right
+  behavior, for free.
+- **Templating gained array-spreading**, motivated by a real button
+  config (Luddy LLC's Approve Event, below) needing to pass a
+  multi-value `peoplePicker` field into a Teams `memberUserIds: string[]`
+  array. Every `peoplePicker` field's value is `string[]` — even a
+  single-person one is a 1-element array — so `{{fields.cohosts}}` as a
+  plain array element used to `String()`-coerce into one broken
+  comma-joined entry (`"a@iu.edu,b@iu.edu"`), not two real ones.
+  `@skye/form-config`'s `interpolate()` (`post-actions/templating.ts`)
+  now special-cases an array element that is EXACTLY one whole
+  `{{namespace.path}}` placeholder (nothing else around it): if it
+  resolves to an array, that array is SPREAD into the parent array's
+  positions instead of stringified. Scoped narrowly — only inside
+  `interpolate`'s array-mapping case, not a general "placeholder
+  preserves type" change to scalar values elsewhere (e.g. `request.body`
+  string properties are unaffected, still always coerce to a JSON
+  string) — so this doesn't change behavior for the many existing
+  postActions that reference a scalar field. A placeholder embedded in a
+  larger string (`"Cohosts: {{fields.cohosts}}"`) still stringifies the
+  old way, since spreading only makes sense for a value occupying its
+  own array slot.
+- **A design trap found (and fixed) building the Luddy LLC approve
+  button, worth remembering for any future branching action chain**:
+  `runIfDependencySkipped: true` can't tell "this dependency was
+  genuinely skipped because a sibling branch ran instead" apart from
+  "this dependency's own ancestor failed" — both show up as `"skipped"`
+  by the time a cascade reaches a downstream action several steps later.
+  A mutually-exclusive pair (e.g. create-vs-update, gated by opposite
+  `when` conditions) that shares ONE downstream chain via
+  `runIfDependencySkipped: true` will happily run that downstream chain
+  even when the ACTIVE branch genuinely failed, not just when the
+  INACTIVE branch was cleanly skipped — caught by a test that
+  specifically failed the active branch and asserted nothing downstream
+  ran. The fix: don't share the downstream chain at all — give each
+  branch its OWN fully independent set of downstream actions (more
+  actions in the config, but each one's `dependsOn` has no override
+  flag, so it only ever runs if every action in ITS OWN branch
+  genuinely ran, cascading correctly through skip AND failure alike).
+- **`field.alwaysEditable?: boolean`** (default `false`) — keeps this
+  ONE field editable even when the whole form is in view mode, which
+  otherwise force-readonlys every field except `controlType: "button"`
+  (`page-scripts/form.ts`'s own loop, right above where it excludes
+  buttons). Real bug found testing the Luddy approve button live: its
+  `hostEmail`/`reviewer` fields exist ONLY to feed the button's own
+  `actions` on click (the host's email for `submittedById`, the
+  reviewer's id for the Teams chat's `memberUserIds`) — never persisted
+  themselves — so an approver needs to type/pick them while otherwise
+  just VIEWING the record, exactly the situation `controlType: "button"`
+  was already excluded from view-mode readonly for. Without this flag,
+  the view-mode loop force-readonlys these two plain
+  `text`/`peoplePicker` fields right alongside every genuinely
+  view-protected field, silently blocking the approve flow before the
+  button's own click handler ever runs (`renderField.ts`/`fieldRegistry.ts`
+  don't distinguish "protects a saved value" from "feeds a button's own
+  action chain" for a non-button control — this flag is that
+  distinction, made explicit per-field rather than inferred). Set on
+  both fields in `skye_data/forms/luddy-llc-event-proposal/admin/form.config.json`.
+- **A custom element's `.value` must ALWAYS return something every
+  caller can safely use, not whatever raw shape it was last SET to.**
+  Two more real bugs found testing the Luddy approve button live, both
+  rooted in the exact same gap: `skye-people-picker`'s `.value` getter
+  used to just return `this._value` (inherited from the base
+  `SkyeValueElement`) — the raw value it was last assigned, which for an
+  UNTOUCHED edit-mode field is still the raw SharePoint shape
+  `mapSharePointFieldsToValues` seeded it with (an object or array of
+  objects), not the clean `string[]` of resolvable keys a picker
+  normally produces once a person is actually re-picked. A button's own
+  `{{fields.x}}` action templating (`runButtonActions.ts` reads
+  `rendered.getValues()` directly, with NO normalisation layer of its
+  own — unlike `submitForm`'s pipeline, which now runs everything
+  through `personIdentifier`, see "People-picker values" above) is
+  exactly such a caller: the approve button's `teams.createChat` action
+  template-stringified an untouched Host/Cohosts value straight into a
+  Graph `user@odata.bind` URL as literal `"[object Object]"`, which
+  Graph correctly rejected with `400 Bad Request`. **Fix**:
+  `SkyePeoplePicker` now overrides BOTH `get value()` (always returns
+  `this.picked.map(p => p.key)`, never the raw `_value`) and `set
+  value()` (a subclass defining only `get value()` silently shadows the
+  base class's `set value()` too — JS accessor pairs are one property
+  descriptor; assigning `.value = x` would then throw in strict mode,
+  which ES modules always are — so both had to be overridden together).
+  Finding this led to a SECOND bug in the same class: `render()` had its
+  own "re-sync `picked` from an externally-set `_value`" heuristic that
+  compared `picked`'s keys against `_value` TREATED as an array of
+  strings — which silently failed to resync for a non-array single-value
+  seed (e.g. Host's raw object, not wrapped in an array) landing on an
+  already-empty `picked`: `arraysShallowEqual([], [])` came back "equal"
+  even though the value was never actually normalised, so `.value` kept
+  returning `[]`. Fixed by having the new `set value()` override
+  recompute `picked` directly and unconditionally (`this.picked =
+  normalisePeopleValue(v)`) instead of relying on that heuristic at all
+  — removed the now-dead `arraysShallowEqual` helper entirely rather
+  than leaving an unused, previously-wrong function around.
+- **A button action that writes the primary item changes its etag
+  OUTSIDE `submitForm`'s own etag-aware path — a later Submit click must
+  pick that up, or it 412s against a now-stale etag.** A third real bug
+  found in the same live test: after the approve button's
+  `saveApprovalFieldsFromCreate` action (a `graphRequest` PATCH straight
+  to the item's `/fields`, with no `If-Match` of its own — see "Button
+  fields" above: "no restriction on it touching the primary item's own
+  list") succeeded, clicking the regular Submit button afterward failed
+  with `EtagConflictError` ("Someone else changed this item since you
+  opened it") — even though the only "someone else" was this same
+  button's own earlier write; `editEtag`/`itemForTemplates` were only
+  ever set once, at initial page load. **Fix, in `page-scripts/form.ts`'s
+  button-click handler**: after `runButtonActions` resolves, if
+  `route.itemId` is set, re-fetch the item (same `selectColumnsForEditPrefill`
+  select as the initial load) and refresh both `editEtag` and
+  `itemForTemplates` in place — deliberately UNCONDITIONAL (not gated on
+  the button's overall result being error-free), since a button's
+  actions run in `dependsOn` order and an EARLIER action's write (the
+  item PATCH) can have already landed before a LATER, unrelated action
+  in the same chain fails (exactly what happened here: the PATCH
+  succeeded, then `openApprovalChatFromCreate`'s Teams-chat creation
+  failed on the `[object Object]` bug above, which is what the user
+  actually saw first). Generic, not Luddy-specific — any future button
+  whose actions write the primary item gets this for free. Best-effort:
+  a failure refetching is swallowed, so a later Submit surfaces its own
+  etag/network error rather than this silently eating the button's
+  actual result.
+
+## `_server/` — the BeInvolved (Campus Labs Engage) proxy Worker
+
+A **standalone Cloudflare Worker**, not part of this repo's pnpm
+workspace (`pnpm-workspace.yaml`'s `packages: - "packages/*"` glob
+doesn't match it) and **gitignored at the repo root** (same treatment as
+`skye_data`) — it has its own release lifecycle, independent of the
+Astro app, and would otherwise carry environment-specific values best
+kept out of this repo's git history. Its own `README.md` is the source
+of truth for setup/deploy/trust-model details; this entry is a pointer
+so a future session knows it exists and why, even though its source
+isn't in git.
+
+**What it's for**: SKYE's browser-side `engage.*` script actions
+(`packages/app/src/integrations/engage/`) currently call the real
+Engage API directly, with `apiKey` as an OPTIONAL config-supplied field
+(see "Campus Labs Engage actions" above) — this Worker is the
+"whitelabeled deployments route through a middleman/proxy that injects
+the real key itself server-side" case that comment already anticipated,
+now actually built. It's a **transparent, drop-in proxy**: it exposes
+the exact same 8 real Engage paths those 8 actions already call
+(`createEvent`/`updateEvent`/`cancelEvent`/`rsvpToEvent`/`updateRsvp`/
+`recordAttendance`/`updateAttendance`/`deleteAttendance`), gated, with
+the real `X-Engage-Api-Key` injected server-side — pointing a config's
+`baseUrl` at this Worker instead of the real Engage host needs zero
+other client-side changes, since the client actions already build those
+exact paths. Deliberately NOT a generic "forward any Engage path"
+proxy — an unmatched path 404s before ever reaching Engage, so a gate
+bug only ever exposes these 8 reviewed operations.
+
+**Gate**: every request must carry an `X-Skye-Organization-Id` header,
+checked against a deployment-configured allowlist — **client-declared,
+not independently verified** against a live Engage lookup (a deliberate
+choice, confirmed before writing any code: the only intended callers
+are SKYE's own reviewed script actions, not arbitrary user input, so
+this is an access-control boundary for "which deployment/org may use
+this proxy at all," not a defense against an already-trusted caller
+lying about which event it's touching — see the Worker's own README for
+what upgrading to a verified lookup would involve if that trust model
+ever needs tightening). Event CREATION gets a second, independent check
+on top of the header, since that's the one route whose real Engage body
+carries its own `submittedByOrganizationId`/`organizationIds`.
+
+**Client-side wiring is done**: every `engage.*` action's options
+interface (`packages/app/src/integrations/engage/*.ts`) now accepts an
+`organizationId?: number`, threaded through to `engageFetch`
+(`client.ts`), which sends it as `X-Skye-Organization-Id` only when
+supplied — omitted entirely (not sent as empty/undefined) when calling
+the real Engage API directly with a real `apiKey` instead of through
+this proxy, so existing direct-call configs are unaffected.
+
+**Deployed** at
+`https://skye-beinvolved-proxy.agua-melaza-0h.workers.dev` (same
+Cloudflare account as the reference implementation this replaces).
+`skye_data/forms/luddy-llc-event-proposal/admin/form.config.json`'s
+"Approve Event" button (§39) now points its `createBeInvolvedEvent`/
+`updateBeInvolvedEvent` actions at this URL with `organizationId: 388096`
+— which also surfaced and fixed a real placeholder: that config's
+`submittedByOrganizationId` had been a literal `0` (the README's own
+"Fill in the placeholders" table flagged this as still-unset), and the
+reference Worker's own hardcoded allowlist (`388096`/`186922`, labeled
+"LLC and ResLife" in its own comment) confirmed `388096` as the real
+Luddy LLC organization id — now fixed to the real value, not a guess
+pulled from nowhere.
+
+Replaces an earlier ad-hoc Cloudflare Worker that used to live entirely
+outside this repo (same core idea — an org-id-gated proxy injecting the
+API key — for just 2 hardcoded Engage paths); this version covers all 8
+`engage.*` operations, has real tests (`_server/test/`, plain
+Node-environment vitest calling the Worker's `fetch(request, env)`
+handler directly with a stubbed outbound `fetch`, not a full
+`@cloudflare/vitest-pool-workers` Workers-runtime harness — a deliberate
+effort/coverage tradeoff, not an oversight), and never hardcodes the
+real API key in source (a Worker *secret*, `wrangler secret put`).
+
+**A real live bug found testing the Luddy approve button end-to-end**:
+calling this proxy from `pnpm dev` (`http://localhost:4321`) failed as a
+bare `TypeError: Failed to fetch` with zero CORS wording anywhere in the
+console — that's simply what a browser's `fetch()` reports for any
+response missing an `Access-Control-Allow-Origin` header (`cors.ts`'s
+own doc comment already explains why: an unrecognized origin gets no
+CORS header at all, so the browser blocks the response client-side,
+same effective result as a 403 but with none of a 403's diagnostic
+detail). Root cause: `wrangler.toml`'s `ALLOWED_ORIGINS` only listed the
+production SharePoint origin. Fixed by adding
+`http://localhost:4321` to the allowlist (`_server/wrangler.toml`) —
+**requires a `wrangler deploy` to take effect on the live Worker**, not
+just this file edit; not yet deployed as of this note. If a `script`
+action calling this proxy ever fails as a generic "Failed to fetch"
+again, check `ALLOWED_ORIGINS` first.
+
 ## Auth: tenant resolution (`src/shared/auth/tenantResolver.ts`)
 
 A single-tenant Azure app registration rejects the `/common` authority
@@ -689,6 +1375,72 @@ remains the zero-prompt option for a single-org deployment. Tenant GUIDs
 aren't secret (every token/URL/discovery doc carries one), so
 `localStorage` is fine. `acquireTokenPopupOnly` (diag only) is exempt — it
 manages the tenant explicitly. See `packages/app/.env.example`.
+
+**A silent-acquisition `timed_out` no longer dead-ends the whole
+sign-in — a real live-tenant bug, found right after the two
+`skyeItemPath` fixes above turned out not to be the user's actual
+problem.** `authProvider.ts`'s `initAndTrySilent` only ever fell through
+to interactive (popup/redirect) when `acquireTokenSilent` threw
+`InteractionRequiredAuthError` — the clean "silent genuinely can't
+satisfy this" signal. But `acquireTokenSilent`'s fallback path opens a
+hidden iframe to the authority and waits for a response, and that
+iframe can simply never complete (a slow network, or — increasingly
+common on browsers restricting third-party cookies, e.g. Safari ITP /
+Chrome's phase-out — the authority's own session cookie being
+unreadable inside the iframe at all) without MSAL ever getting far
+enough to recognize it as "interaction required." That surfaces as a
+`BrowserAuthError` with `errorCode: "timed_out"` instead — a DIFFERENT
+error class the old code treated as fatal, rethrowing it all the way to
+the page's generic error state instead of ever showing the popup that
+would have worked fine. Confirmed live: a real user's console showed
+exactly `GraphError: timed_out` with no further recovery. Fixed by also
+treating `err instanceof BrowserAuthError && err.errorCode ===
+BrowserAuthErrorCodes.timedOut` as "fall through to interactive," same
+as `InteractionRequiredAuthError`. 3 new tests in
+`src/__tests__/authProvider.test.ts` (falls through on
+`InteractionRequiredAuthError`; falls through on the `timed_out`
+`BrowserAuthError` — the actual case that was broken; does NOT fall
+through for an unrelated error, confirming the broadened catch stayed
+narrow). Mocking note for future MSAL tests: `PublicClientApplication`
+must be mocked as `vi.fn().mockImplementation(function () { return
+mockInstance; })` — a plain `function`, not an arrow — since `vi.fn()`
+can only be invoked with `new` (as `getMsalInstance` does) when its
+implementation is a real constructor function.
+
+**`applicationId` is recovered the same way tenantId already was, plus a
+new shared resolver ties both together.** A URL that loses its
+`?applicationId=`/`?tenantId=` entirely — e.g. an MSAL redirect
+round-trip that couldn't recover the pre-redirect URL and fell back to
+the bare origin (`pages/auth.astro`'s own docstring already flagged this
+as a real failure mode: "dumping people on the bare origin with every
+query param lost") — used to just dead-end on `/form`/`/view` (both
+require a real `applicationId` to resolve a route at all) rather than
+self-heal the way a lost tenantId alone already did.
+`tenantResolver.ts`'s `resolveApplicationAndTenantId(search, envDefaults?)`
+is the one place both now get resolved together: URL → that page's own
+existing env-default (`PUBLIC_DEFAULT_APPLICATION_ID`/
+`PUBLIC_DEFAULT_TENANT_ID`, passed in per-caller since `/form`/`/view`
+never used these while `/switcher`/`/builder` did — this doesn't change
+that) → whatever this browser last used successfully
+(`getCachedApplicationId`/`getCachedTenantId`, new+existing localStorage
+caches). A value recovered from the cache is backfilled into the address
+bar (`backfillApplicationIdInUrl`/`backfillTenantIdInUrl`, no
+navigation); the env-default case is never backfilled, since it's already
+free. **The two ids are NOT cached symmetrically**: a URL-provided
+`applicationId` is cached directly here (not a secret, and a wrong value
+fails no worse than a missing one); a URL-provided `tenantId` is
+deliberately NOT auto-cached here — only one a real successful sign-in
+actually confirmed gets remembered (`rememberTenantFromResult`,
+unchanged), so a wrong/typo'd `?tenantId=` in some copied link can never
+poison the cache for a later, different visit. `routing.ts`'s
+`parseCurrentRoute()`/`parseCurrentViewRoute()` call this before parsing
+(no env defaults — preserves `/form`/`/view`'s existing "no
+PUBLIC_DEFAULT_APPLICATION_ID fallback" behavior exactly, only adds the
+cache layer); `builder.ts`/`switcher.ts` call it with their existing env
+defaults passed through, replacing their previous inline
+`params.get(...) ?? PUBLIC_DEFAULT_...` chains (which is also a genuine
+small fix for `builder.ts`, which never consulted the tenantId cache at
+all before this).
 
 ## Real-tenant Graph permissions (IU) — what's available for actions/postActions
 
@@ -815,6 +1567,19 @@ only support `GET`/`PATCH` + the separate cancel action, no DELETE) and no
 `engage.updateRsvp({ ..., response: "No" })` instead). Attendance genuinely does support a
 real DELETE, so `engage.deleteAttendance` is a plain one-to-one wrapper.
 
+`engage.createEvent`/`engage.updateEvent` now return `accessCode` too
+(alongside the existing `eventId`/`name`/`startsOn`/`endsOn`) — the
+event's attendance-scanner check-in code. Same "pull the raw spec"
+discipline paid off again here: confirmed present on the real response
+(`3.0-Event-PostPutResponse.accessCode: string`) by downloading
+`https://engage-api.campuslabs.com/swagger/swagger.json` directly and
+grepping its `definitions`, after `WebFetch`'s own page-summarization
+step twice failed to surface it from the (large) spec. Previously
+missing from both actions' return statements entirely — a config
+referencing `{{results.<actionKey>.accessCode}}` (the Luddy LLC admin
+form's own approve flow already did) silently resolved to `""`, not an
+error, so this was a real, live gap, not just an untested one.
+
 ```jsonc
 // Example: reschedule an event, then cancel a different one, via chained postActions.
 {
@@ -829,6 +1594,29 @@ real DELETE, so `engage.deleteAttendance` is a plain one-to-one wrapper.
 { "type": "script", "functionName": "engage.cancelEvent",
   "args": [{ "eventId": 4821, "comments": "Rescheduled due to weather" }] }
 ```
+
+**Confirmed live against the real IU Engage account (2026-10): the
+`_server` proxy's `ENGAGE_API_KEY` can CREATE events but is NOT
+authorized to UPDATE them.** `engage.updateEvent` (the Luddy approve
+button's re-approval branch — runs when an item already has a
+BeInvolved event id from a prior approve) failed with a real `403` from
+Engage itself: `{"error":"The specified API key is not authorized to
+use this endpoint.", "version":"v3.0", "method":"PATCH", "endpoint":
+"/events/event/<id>", "ip":"<cloudflare-edge-ip>"}`. Confirmed this is
+genuinely Engage's own rejection, not `_server`'s gate (whose own 403
+body is just `{"error": "<message>"}`, with none of Engage's
+`version`/`method`/`endpoint`/`ip` fields) — the request shape itself
+was also independently verified correct (`PATCH /v3.0/events/event/{id}`
+with an RFC 6902 patch body, matching the error's own `"method"`/
+`"endpoint"` exactly). **This is an Engage-account-side API key
+permission gap, not an app bug** — Campus Labs Engage API keys are
+scoped per-endpoint by whoever issues them, and this one was evidently
+only ever granted Create, not Update. Re-approving an already-approved
+Luddy LLC event will keep failing this way until whoever manages the
+Engage integration grants this key Update permission on the Events
+endpoint (or the approve button's update branch is accepted as
+unsupported until then). No code fix exists for this — flagged here so
+it isn't re-diagnosed as a bug next time it's hit.
 
 **Confirmed directly (not just inferred): no currently-granted scope reaches calendar data
 at all.** `GET /me/events` with a token carrying only `User.ReadBasic.All` (deliberately no

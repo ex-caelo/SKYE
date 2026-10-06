@@ -4,6 +4,8 @@ import { engageFetch, DEFAULT_ENGAGE_BASE_URL } from "./client.js";
 export interface CancelEngageEventOptions {
   apiKey?: string;
   baseUrl?: string;
+  /** Only meaningful when `baseUrl` points at SKYE's own gated BeInvolved proxy (_server/) — sent as that proxy's required X-Skye-Organization-Id header. See client.ts's engageFetch docstring. */
+  organizationId?: number;
   eventId: number;
   /** Optional reason shown alongside the cancellation. */
   comments?: string;
@@ -25,7 +27,7 @@ export const cancelEvent: ScriptAction = async (args, ctx) => {
   const res = await engageFetch(ctx, options.baseUrl ?? DEFAULT_ENGAGE_BASE_URL, options.apiKey, `/v3.0/events/event/${options.eventId}/cancel`, {
     method: "POST",
     body: { comments: options.comments },
-  });
+  }, options.organizationId);
 
   return { eventId: options.eventId, status: res?.status, comments: res?.comments };
 };

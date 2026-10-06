@@ -1,3 +1,5 @@
+import { resolveApplicationAndTenantId } from "./auth/tenantResolver.js";
+
 export type FormMode = "create" | "edit" | "view";
 
 export interface FormRoute {
@@ -83,6 +85,11 @@ export function parseRoute(hash: string, search: string): Route {
 
 /** Reads the real browser location — the only place in this module that touches `window`. */
 export function parseCurrentRoute(): Route {
+  // If applicationId/tenantId are missing here, try recovering whichever ones this browser last
+  // used successfully (see resolveApplicationAndTenantId's own doc comment) — a recovered value
+  // is backfilled into the address bar, so re-reading window.location.search below picks it up
+  // the same way it would if the URL had carried it all along.
+  resolveApplicationAndTenantId(window.location.search);
   return parseRoute(window.location.hash, window.location.search);
 }
 
@@ -109,6 +116,8 @@ export function parseViewRoute(hash: string, search: string): ViewRoute | Unreso
 
 /** Reads the real browser location for the `/view` page. */
 export function parseCurrentViewRoute(): ViewRoute | UnresolvedRoute {
+  // Same recovery as parseCurrentRoute() above — see resolveApplicationAndTenantId.
+  resolveApplicationAndTenantId(window.location.search);
   return parseViewRoute(window.location.hash, window.location.search);
 }
 

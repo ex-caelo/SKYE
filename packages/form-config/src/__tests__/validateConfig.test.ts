@@ -38,6 +38,36 @@ describe("validateFormConfig", () => {
     expect(lines.length).toBeGreaterThan(0);
     expect(lines.every((l) => typeof l === "string" && l.length > 0)).toBe(true);
   });
+
+  it("accepts a controlType: 'button' field with its own actions dict, each entry using trigger: 'onClick'", () => {
+    const result = validateFormConfig({
+      list: { id: "list1" },
+      pages: { main: { title: "Main" } },
+      fields: {
+        name: { page: "main", source: "sharepoint", bindTo: "Title", controlType: "text" },
+        sendReminder: {
+          page: "main",
+          source: "virtual",
+          controlType: "button",
+          label: "Send Reminder",
+          actions: {
+            notify: { trigger: "onClick", type: "showMessage", message: "Reminder sent." },
+          },
+        },
+      },
+    });
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("rejects a controlType: 'button' field missing its required actions/label", () => {
+    const result = validateFormConfig({
+      list: { id: "list1" },
+      pages: { main: { title: "Main" } },
+      fields: { sendReminder: { page: "main", source: "virtual", controlType: "button" } },
+    });
+    expect(result.valid).toBe(false);
+  });
 });
 
 describe("validateFormConfigOverlay", () => {

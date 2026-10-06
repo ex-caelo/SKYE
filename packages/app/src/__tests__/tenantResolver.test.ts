@@ -4,6 +4,10 @@ import {
   cacheTenantId,
   clearCachedTenantId,
   backfillTenantIdInUrl,
+  getCachedApplicationId,
+  cacheApplicationId,
+  backfillApplicationIdInUrl,
+  resolveApplicationAndTenantId,
   discoverTenantIdFromDomain,
   isCommonEndpointUnsupported,
 } from "../shared/auth/tenantResolver.js";
@@ -62,6 +66,80 @@ describe("backfillTenantIdInUrl", () => {
     const before = window.location.href;
     backfillTenantIdInUrl(GUID);
     expect(window.location.href).toBe(before);
+  });
+});
+
+describe("applicationId cache", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("round-trips an applicationId", () => {
+    expect(getCachedApplicationId()).toBeUndefined();
+    cacheApplicationId("app-1");
+    expect(getCachedApplicationId()).toBe("app-1");
+  });
+});
+
+describe("backfillApplicationIdInUrl", () => {
+  beforeEach(() => history.replaceState({}, "", "/view?siteId=s1#calendar"));
+
+  it("adds ?applicationId= while preserving the path and hash", () => {
+    backfillApplicationIdInUrl("app-1");
+    expect(window.location.pathname).toBe("/view");
+    expect(new URLSearchParams(window.location.search).get("applicationId")).toBe("app-1");
+    expect(window.location.hash).toBe("#calendar");
+  });
+
+  it("is a no-op when the same applicationId is already present", () => {
+    history.replaceState({}, "", "/view?siteId=s1&applicationId=app-1#calendar");
+    const before = window.location.href;
+    backfillApplicationIdInUrl("app-1");
+    expect(window.location.href).toBe(before);
+  });
+});
+
+describe("resolveApplicationAndTenantId", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    history.replaceState({}, "", "/form?siteId=s1#abc123");
+  });
+
+  it("prefers the URL's own values, and remembers a URL-provided applicationId for later", () => {
+    history.replaceState({}, "", `/form?siteId=s1&applicationId=app-1&tenantId=${GUID}#abc123`);
+    expect(resolveApplicationAndTenantId(window.location.search)).toEqual({ applicationId: "app-1", tenantId: GUID });
+    expect(getCachedApplicationId()).toBe("app-1");
+    // Unlike applicationId, a tenantId merely typed into a URL is deliberately NOT cached here —
+    // only a tenant id confirmed by a real successful sign-in gets remembered (rememberTenantFromResult,
+    // via cacheTenantId elsewhere), so a wrong/typo'd URL value can never poison future visits.
+    expect(getCachedTenantId("app-1")).toBeUndefined();
+  });
+
+  it("falls back to envDefaults when the URL has neither", () => {
+    expect(resolveApplicationAndTenantId(window.location.search, { applicationId: "default-app", tenantId: "default-tenant" })).toEqual({
+      applicationId: "default-app",
+      tenantId: "default-tenant",
+    });
+    // envDefaults are always-available and free — not backfilled into the address bar.
+    expect(new URLSearchParams(window.location.search).get("applicationId")).toBeNull();
+  });
+
+  it("recovers a missing applicationId/tenantId from this browser's cache and backfills the address bar", () => {
+    cacheApplicationId("app-1");
+    cacheTenantId("app-1", GUID);
+
+    expect(resolveApplicationAndTenantId(window.location.search)).toEqual({ applicationId: "app-1", tenantId: GUID });
+    expect(new URLSearchParams(window.location.search).get("applicationId")).toBe("app-1");
+    expect(new URLSearchParams(window.location.search).get("tenantId")).toBe(GUID);
+    expect(window.location.hash).toBe("#abc123");
+  });
+
+  it("a URL-provided applicationId still allows a cached tenantId to fill in", () => {
+    history.replaceState({}, "", "/form?siteId=s1&applicationId=app-1#abc123");
+    cacheTenantId("app-1", GUID);
+    expect(resolveApplicationAndTenantId(window.location.search)).toEqual({ applicationId: "app-1", tenantId: GUID });
+  });
+
+  it("returns undefined for both when there's no URL value, no env default, and nothing cached", () => {
+    expect(resolveApplicationAndTenantId(window.location.search)).toEqual({ applicationId: undefined, tenantId: undefined });
   });
 });
 

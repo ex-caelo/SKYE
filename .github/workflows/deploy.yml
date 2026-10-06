@@ -1,0 +1,87 @@
+# Builds @skye/app (a static Astro site — see packages/app/astro.config.mjs)
+# and publishes packages/app/dist to GitHub Pages at the custom domain
+# configured via packages/app/public/CNAME (openskye.app).
+#
+# One-time setup this workflow does NOT do for you:
+#   1. Settings -> Pages -> Source: "GitHub Actions" (not a branch).
+#   2. Settings -> Pages -> Custom domain: openskye.app, and wait for GitHub's
+#      DNS check to pass before "Enforce HTTPS" becomes available. openskye.app
+#      is an apex (root) domain, so its DNS must use A records (or ALIAS/ANAME
+#      if the registrar supports it) pointing at GitHub Pages' IPs — a CNAME
+#      record isn't valid on an apex. This is already in place for this domain.
+#   3. Repo Settings -> Secrets and variables -> Actions -> Variables: add
+#      PUBLIC_DEFAULT_APPLICATION_ID and PUBLIC_DEFAULT_TENANT_ID (the values of
+#      SKYE_APPLICATION_ID and IU_TENANT_ID in packages/app/.env locally) so the
+#      site switcher and sign-in work without query params. These are
+#      build-time-inlined GUIDs, not secrets, but Variables (not Secrets) is
+#      still the right place since they don't need masking.
+#   4. Entra app registration -> Authentication -> add
+#      https://openskye.app/auth as a "Single-page application" redirect URI
+#      (see packages/app/src/shared/auth/redirectUri.ts) — sign-in will fail
+#      with AADSTS50011 until this is added.
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time; a new push cancels an in-flight one
+# rather than queuing behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      # No separate "pnpm approve-builds" step needed: this repo commits its
+      # build approvals in pnpm-workspace.yaml's `allowBuilds`, which a plain
+      # install already honors (that's the whole point of committing it —
+      # see CLAUDE.md). Confirmed against a full `rm -rf node_modules` +
+      # this exact command locally: no ERR_PNPM_IGNORED_BUILDS, esbuild/sharp
+      # postinstall scripts ran. (`pnpm approve-builds --all` itself turned
+      # out to error — "Unknown option: 'all'", exit 1 — on the pnpm version
+      # pinned here despite being listed in --help; dropped rather than
+      # worked around, since it isn't needed at all here.)
+      - run: pnpm install --frozen-lockfile
+
+      # Builds both workspace packages via Turborepo (see turbo.json) —
+      # simplest way to get @skye/app's real build output in packages/app/dist.
+      - run: pnpm build
+        env:
+          PUBLIC_DEFAULT_APPLICATION_ID: ${{ vars.PUBLIC_DEFAULT_APPLICATION_ID }}
+          PUBLIC_DEFAULT_TENANT_ID: ${{ vars.PUBLIC_DEFAULT_TENANT_ID }}
+          PUBLIC_AUTH_ALLOW_COMMON: ${{ vars.PUBLIC_AUTH_ALLOW_COMMON }}
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/app/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

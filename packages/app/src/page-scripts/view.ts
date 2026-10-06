@@ -1,6 +1,5 @@
 import { parseCurrentViewRoute, buildViewSwitcherRedirectUrl } from "../shared/routing.js";
 import { createGraphClient } from "../shared/sharepoint/createGraphClient.js";
-import { getCachedTenantId } from "../shared/auth/tenantResolver.js";
 import { completeRedirectReturn } from "../shared/auth/redirectReturn.js";
 import { resolveSiteConfig, SkyeNotConfiguredError } from "../shared/site-config.js";
 import { mountView } from "../features/custom-views/viewHost.js";
@@ -15,6 +14,11 @@ import { showState, fillSlot } from "../shared/ui/pageState.js";
  * state. All state markup lives in view.astro.
  */
 async function main() {
+  // Same fix as entry-form.ts: this page's route (which view) lives entirely in the URL hash, but
+  // a browser doesn't reload a page's scripts on a hash-only change — a host-mediated view→view
+  // navigation (see CLAUDE.md's Custom Views section) would silently do nothing without this.
+  window.addEventListener("hashchange", () => window.location.reload());
+
   // Landing back from an MSAL loginRedirect? Finish it and return to the pre-redirect URL first.
   if (await completeRedirectReturn()) return;
 
@@ -30,8 +34,10 @@ async function main() {
     return;
   }
 
-  // URL → PUBLIC_DEFAULT_TENANT_ID → a tenant id a previous sign-in cached; else /common + self-heal (tenantResolver.ts).
-  const tenantId = route.tenantId ?? import.meta.env.PUBLIC_DEFAULT_TENANT_ID ?? getCachedTenantId(route.applicationId);
+  // URL → PUBLIC_DEFAULT_TENANT_ID. (A cached tenant id was already recovered into route.tenantId
+  // by parseCurrentViewRoute() above — see tenantResolver.ts's resolveApplicationAndTenantId.)
+  // Still none → /common + self-heal (tenantResolver.ts).
+  const tenantId = route.tenantId ?? import.meta.env.PUBLIC_DEFAULT_TENANT_ID;
   const graph = createGraphClient(route.applicationId, tenantId);
 
   let siteConfig;
@@ -50,6 +56,14 @@ async function main() {
     }
     throw err;
   }
+
+  // The view's own name comes from its view.json (falling back to its folder id). Best-effort: a
+  // listing failure just leaves the id in the title rather than blocking the view itself.
+  const viewTitle = await graph
+    .listSkyeViews(route.siteId)
+    .then((views) => views.find((v) => v.viewId === route.viewId)?.title)
+    .catch(() => undefined);
+  document.title = `SKYE: ${viewTitle ?? route.viewId}`;
 
   const screen = showState(appRoot, "screen-view");
   await mountView({

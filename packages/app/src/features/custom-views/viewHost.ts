@@ -191,7 +191,7 @@ export async function mountView(opts: MountViewOptions): Promise<MountedView> {
   // default-src 'none' kills fetch, XHR, WebSocket, and remote images. The exceptions are
   // deliberate: 'unsafe-inline' permits the runtime, 'unsafe-eval' lets it run the author's code
   // via AsyncFunction, and img-src data: is not an exfil channel because a data: URI makes no request.
-  frame.srcdoc = `<!doctype html>
+  frame.srcdoc = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:">
 <style>${viewCss}</style>

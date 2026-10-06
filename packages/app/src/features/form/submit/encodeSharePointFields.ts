@@ -1,11 +1,34 @@
 import type { FieldConfig, FieldValues } from "@skye/form-config";
 import type { GraphClient, GraphListColumn } from "../../../shared/sharepoint/types.js";
+import { personIdentifier } from "./personIdentifier.js";
 
 export interface EncodedFields {
   /** The `fields` payload to hand to createListItem / updateListItem. */
   fields: Record<string, unknown>;
   /** Per-field-key messages for anything that couldn't be fully encoded (e.g. a person who isn't a site user). The submission still proceeds; that field is left unwritten. */
   errors: Record<string, string>;
+}
+
+/**
+ * A `file` controlType field can't be bound to a `hyperlinkOrPicture` or
+ * `thumbnail` (Image) column — confirmed against a live tenant (2026-09):
+ * both a plain URL string AND the fuller structured JSON shape these
+ * column types otherwise expect both come back `generalException` from
+ * Graph's `/fields` PATCH/POST, matching independent reports that Graph
+ * doesn't support writing these column types at all, regardless of shape
+ * or API version (only the older SharePoint REST API does). There is no
+ * write this app can attempt here that's known to work — so rather than
+ * retry a shape that's already failed live, this reports it as a
+ * left-unwritten field error (like an unresolvable person). The message
+ * itself stays short and user-facing (it surfaces verbatim in the
+ * submit-status banner, same as the unresolvable-person case) — the fix a
+ * config author actually needs (bind the field to a plain Text/Note
+ * column instead, to store the URL as a string) belongs in this file's
+ * comments and the form's own README, not in something an end user sees.
+ */
+function unsupportedFileColumnError(field: FieldConfig, column: GraphListColumn): string {
+  const saved = field.fileStorage?.target === "library" ? " (the file itself still uploaded)" : "";
+  return `"${column.displayName}" couldn't be saved on this item${saved} — ask whoever maintains this form to fix it.`;
 }
 
 /** Coerces a scalar-or-array value into a clean array of non-empty entries. */
@@ -19,6 +42,12 @@ function toList(value: unknown): unknown[] {
  * using each bound column's real type (from getListColumns) to encode
  * multi-value data the way SharePoint's Graph API actually expects:
  *
+ *  - **file controlType, bound to a hyperlinkOrPicture or thumbnail
+ *    (Image) column** — reported as an error and left unwritten; see
+ *    unsupportedFileColumnError for why (Graph can't write these column
+ *    types, confirmed live). Any OTHER column type gets the uploaded
+ *    webUrl (already substituted into `values` by submitForm's upload
+ *    step) as a plain string, same as any other text-like field.
  *  - **personOrGroup** — each picked person (an email or directory id, as
  *    the people picker stores them) is resolved to this site's numeric
  *    User Information List id and written as `<col>LookupId` (a single id
@@ -54,9 +83,18 @@ export async function buildPrimarySharePointFields(
     const value = values[fieldKey];
     const column = columnsByName.get(field.bindTo);
 
+    // --- file field bound to a column type Graph can't write to at all — see unsupportedFileColumnError ---
+    if (field.controlType === "file" && column && (column.columnType === "hyperlinkOrPicture" || column.columnType === "thumbnail")) {
+      errors[fieldKey] = unsupportedFileColumnError(field, column);
+      continue;
+    }
+
     // --- Person / group column: resolve people to site user ids ---
     if (column?.columnType === "personOrGroup") {
-      const identifiers = toList(value).map(String);
+      // personIdentifier (not a naive `.map(String)`) so an untouched edit-mode value — a raw
+      // SharePoint `{LookupId, LookupValue, Email}` object/array — resolves correctly instead of
+      // stringifying to "[object Object]" and getting dropped as an unresolvable person.
+      const identifiers = toList(value).map(personIdentifier);
       if (identifiers.length === 0) continue; // cleared / untouched — don't overwrite
 
       const resolved = await Promise.all(identifiers.map((id) => graph.resolveSiteUserId(siteId, id).catch(() => null)));

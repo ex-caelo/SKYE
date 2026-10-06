@@ -9,6 +9,19 @@ describe("MockGraphClient", () => {
     expect(columns.find((c) => c.name === "Title")).toBeTruthy();
   });
 
+  it("resolveSiteUserEmail is the inverse of resolveSiteUserId's own fixture-derived numbering", async () => {
+    const client = new MockGraphClient();
+    const lookupId = await client.resolveSiteUserId("site1", "alex.chen@example.edu");
+    expect(lookupId).not.toBeNull();
+    const email = await client.resolveSiteUserEmail("site1", lookupId!);
+    expect(email).toBe("alex.chen@example.edu");
+  });
+
+  it("resolveSiteUserEmail returns null for an id with no matching fixture person", async () => {
+    const client = new MockGraphClient();
+    await expect(client.resolveSiteUserEmail("site1", 999999)).resolves.toBeNull();
+  });
+
   it("lists the site's lists (id + displayName), sorted, for the builder's new-form list picker", async () => {
     const client = new MockGraphClient();
     const lists = await client.listSiteLists("site1");
@@ -54,6 +67,13 @@ describe("MockGraphClient", () => {
     const client = new MockGraphClient();
     const results = await client.searchPeople("");
     expect(results.length).toBeGreaterThan(1);
+  });
+
+  it("also searches fixture people by email, not just display name", async () => {
+    const client = new MockGraphClient();
+    const results = await client.searchPeople("alex.chen@example.edu");
+    expect(results).toHaveLength(1);
+    expect(results[0].displayName).toBe("Alex Chen");
   });
 
   it("searches list items by a display field and returns id/label pairs", async () => {

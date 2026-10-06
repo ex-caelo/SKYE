@@ -1,4 +1,4 @@
-import type { FieldConfig, FieldValues } from "../schema/types.js";
+import type { CustomValidatorRef, FieldConfig, FieldValues } from "../schema/types.js";
 
 export interface ValidationResult {
   valid: boolean;
@@ -71,6 +71,11 @@ export function validateField(field: FieldConfig, value: unknown, allValues: Fie
   return { valid: true };
 }
 
+/** A bare-name entry has no args; a `{ name, args }` entry carries them through to the registered function. */
+function normalizeCustomValidatorRef(ref: CustomValidatorRef): { name: string; args?: Record<string, unknown> } {
+  return typeof ref === "string" ? { name: ref } : ref;
+}
+
 /**
  * Runs a field's registered custom validators (see customValidatorRegistry.ts
  * for the "hardcoded, never fetched from SharePoint" contract) after the
@@ -80,15 +85,16 @@ export function runCustomValidators(
   field: FieldConfig,
   value: unknown,
   allValues: FieldValues,
-  registry: Record<string, (value: unknown, allValues: FieldValues) => true | string>
+  registry: Record<string, (value: unknown, allValues: FieldValues, args?: Record<string, unknown>) => true | string>
 ): ValidationResult {
-  for (const name of field.customValidators ?? []) {
+  for (const ref of field.customValidators ?? []) {
+    const { name, args } = normalizeCustomValidatorRef(ref);
     const validator = registry[name];
     if (!validator) {
       // A config referencing an unregistered validator is a loud error, not a silent pass.
       throw new Error(`Field references customValidator "${name}", which is not registered.`);
     }
-    const outcome = validator(value, allValues);
+    const outcome = validator(value, allValues, args);
     if (outcome !== true) {
       return { valid: false, message: outcome };
     }

@@ -149,6 +149,42 @@ describe("submitForm", () => {
     expect(String(result.item?.fields.ReportUrl)).toContain("report.pdf");
   });
 
+  it("uploads a poster but reports it left unwritten when bound to an Image (thumbnail) column Graph can't write", async () => {
+    const graph = new MockGraphClient();
+    const configWithPoster: FormConfig = {
+      list: { id: "submit-test-poster-list" },
+      pages: { p1: { title: "Page 1" } },
+      fields: {
+        poster: {
+          page: "p1",
+          source: "sharepoint",
+          bindTo: "Poster",
+          controlType: "file",
+          fileStorage: { target: "library", library: { driveId: "drive-1" } },
+        },
+      },
+    };
+    const file = new File(["bytes"], "poster.png", { type: "image/png" });
+
+    const result = await submitForm({
+      config: configWithPoster,
+      values: { poster: file },
+      siteId: "site1",
+      mode: "create",
+      graph,
+      graphFetch: vi.fn(),
+      callbacks: stubCallbacks(),
+      listColumns: [{ name: "Poster", displayName: "Poster", columnType: "thumbnail" }],
+    });
+
+    // The upload itself still succeeds (fileUploadErrors is about the upload step, not this);
+    // the primary item write goes through too, just without the Poster column set.
+    expect(result.success).toBe(true);
+    expect(result.fileUploadErrors).toBeUndefined();
+    expect(result.item?.fields).not.toHaveProperty("Poster");
+    expect(result.fieldErrors?.poster).toMatch(/"Poster" couldn't be saved/);
+  });
+
   it("reports fileUploadErrors without aborting the submission when attachment-mode (unimplemented) is used", async () => {
     const graph = new MockGraphClient();
     const configWithFile: FormConfig = {

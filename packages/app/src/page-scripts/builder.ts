@@ -24,7 +24,8 @@ import { showState, el, fillSlot } from "../shared/ui/pageState.js";
 import { ensureInvokerCommands } from "../shared/ui/invokers.js";
 import { buildDraftPreviewUrl } from "../shared/routing.js";
 import { customValidators } from "../features/form/customValidatorRegistry.js";
-import type { GraphClient, GraphListColumn, SkyeListSummary } from "../shared/sharepoint/types.js";
+import { resolveApplicationAndTenantId } from "../shared/auth/tenantResolver.js";
+import type { GraphClient, GraphListColumn, SkyeListSummary, SkyeViewSummary } from "../shared/sharepoint/types.js";
 
 /**
  * Entry point for pages/builder.astro — a standalone tool for creating and
@@ -79,6 +80,8 @@ interface BuilderState {
   selectedView: string;
   selectedFieldKey: string | undefined;
   listColumns: GraphListColumn[];
+  /** The site's real Custom Views — powers the "Back link" setting's dropdown (see formSettingsEditor.ts's renderBackViewControl). */
+  skyeViews: SkyeViewSummary[];
 }
 
 function setStatus(el: HTMLElement, message: string, level?: "info" | "success" | "warning" | "error"): void {
@@ -107,14 +110,19 @@ async function main() {
   const appRoot = document.getElementById("skye-app");
   if (!appRoot) throw new Error('entry-builder: missing "#skye-app" mount point in the page.');
 
-  const params = new URLSearchParams(window.location.search);
-  const applicationId = params.get("applicationId") ?? import.meta.env.PUBLIC_DEFAULT_APPLICATION_ID;
+  // URL → this deployment's PUBLIC_DEFAULT_APPLICATION_ID/PUBLIC_DEFAULT_TENANT_ID → whichever
+  // ones this browser last used successfully (backfilled into the address bar when recovered —
+  // see resolveApplicationAndTenantId's own doc comment).
+  const { applicationId, tenantId } = resolveApplicationAndTenantId(window.location.search, {
+    applicationId: import.meta.env.PUBLIC_DEFAULT_APPLICATION_ID,
+    tenantId: import.meta.env.PUBLIC_DEFAULT_TENANT_ID,
+  });
   if (!applicationId) {
     showState(appRoot, "state-config-missing");
     return;
   }
-  const tenantId = params.get("tenantId") ?? import.meta.env.PUBLIC_DEFAULT_TENANT_ID ?? undefined;
   const graph = createGraphClient(applicationId, tenantId);
+  const params = new URLSearchParams(window.location.search);
 
   let siteId = params.get("siteId") ?? undefined;
   const prefillFormId = window.location.hash.replace(/^#/, "") || undefined;
@@ -276,6 +284,7 @@ async function openBuilder(
     selectedView: "base",
     selectedFieldKey: undefined,
     listColumns: [],
+    skyeViews: [],
   };
 
   if (isNew && newFormSeed) {
@@ -310,6 +319,11 @@ async function openBuilder(
     state.listColumns = await graph.getListColumns(baseList.siteId ?? siteId, baseList.id);
   } catch (err) {
     console.warn("entry-builder: couldn't load live list columns (bindTo will fall back to free text):", err);
+  }
+  try {
+    state.skyeViews = await graph.listSkyeViews(siteId);
+  } catch (err) {
+    console.warn("entry-builder: couldn't load this site's Custom Views (backView will fall back to free text):", err);
   }
 
   // Brand-new form: seed a bound, `order`-ed field for every required list column so it can
@@ -429,6 +443,7 @@ async function openBuilder(
         renderFieldEditor(targetFields[key] as never, refreshPreview, document, {
           listColumns: state.listColumns,
           pageKeys: pageKeysForEditor(),
+          scriptActionNames: SCRIPT_ACTION_NAMES,
         })
       );
 
@@ -521,6 +536,7 @@ async function openBuilder(
         renderFormSettingsEditor(target as unknown as FormConfig, refreshPreview, document, {
           scriptActionNames: SCRIPT_ACTION_NAMES,
           listColumns: state.listColumns,
+          skyeViews: state.skyeViews,
           defaultPageKey: pageKeysForEditor()[0],
           requiredColumnCheck: state.selectedView === "base" || isDraftKey(state.selectedView),
           onFieldsChanged: () => {

@@ -20,6 +20,14 @@ body {
 @media (min-width: 701px) {
 	html body {
 		margin-top: 5rem;
+		/* The base body min-height assumed a 2rem top margin; shrink it by the extra 3rem so the body
+		   (margin + min-height) still fits exactly one viewport and doesn't force a scrollbar.
+		   Min-height is only a floor, so taller content still scrolls. */
+		min-height: calc(100svh - 5rem);
+		/* A little background stays visible below the container once the page scrolls. Padding rather
+		   than margin, since a bottom margin can collapse through <html>. Border-box sizing (set
+		   globally above) means this doesn't push the short-page height past one viewport. */
+		padding-bottom: 2rem;
 	}
 }
 

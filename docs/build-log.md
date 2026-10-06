@@ -4033,3 +4033,28 @@ original element is genuinely gone, not just visually covered.
   this covers all of them.
 - Verified: build succeeds and the rule is in the emitted `form.css`. Not checked
   in a browser; the Chrome extension was unavailable.
+
+## 67. Scrollbar introduced by the wide-screen logo reserve
+
+- §66 raised the body top margin to 5rem, but the body's `min-height`
+  (`calc(100svh - 2rem)`) still assumed a 2rem top margin. The body
+  therefore came to 100svh + 3rem and forced a scrollbar on every page.
+- Fix in the wide-screen `html body` rule in `form.css`: `min-height:
+  calc(100svh - 5rem)`. Margin plus min-height now fills exactly one
+  viewport. Min-height is only a floor, so pages whose content is taller
+  still scroll.
+- Narrow screens are unchanged (the rule is inside the 701px+ media query).
+- Verified: build succeeds and the rule is in the emitted CSS. Not checked
+  in a browser; the Chrome extension is unavailable.
+
+## 68. Background visible below scrolling pages
+
+- The wide-screen `html body` rule in `form.css` gets `padding-bottom: 2rem`,
+  so a page taller than the viewport ends with a strip of background under the
+  container. Padding is used rather than margin because a bottom margin can
+  collapse through `<html>`.
+- Short pages are unaffected: `* { box-sizing: border-box }` is set globally, so
+  the padding is inside the existing `min-height: calc(100svh - 5rem)` and no
+  scrollbar returns. Applies to forms and `/view`, since `view.css`'s own body
+  padding is overridden by the more specific rule.
+- Verified: build succeeds. Not checked in a browser; the Chrome extension is unavailable.

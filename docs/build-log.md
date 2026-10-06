@@ -4001,3 +4001,22 @@ original element is genuinely gone, not just visually covered.
 - Open decision: `/test` and `/diag` are built and would be published
   publicly. `test.astro` is a static debugging dump and `diag.astro` is an
   internal tool; neither was removed.
+
+## 65. View loader uses the shared spinner
+
+- The status line shown while a Custom View's files load was plain text
+  ("Loading view…") set from `features/custom-views/viewHost.ts`. It now uses
+  the same `Loading` component as the other loaders. `view.astro` holds it in
+  `<template data-tpl="view-loading">`, and `mountView` clones it. A missing
+  template throws. The element keeps the `skye-view__status` class, so the
+  error and warning colours still apply, and error text replaces the spinner
+  as before.
+- `astroMarkupHooks.test.ts` gained the new hook for `pages/view.astro`.
+- Verified: typecheck clean; `pnpm build` succeeds and the view page output
+  contains the template.
+- **Test failures caused by the admin config on disk**: `skye_data/forms/
+  luddy-llc-event-proposal/admin/form.config.json` no longer contains the
+  approve-button field or the defaults, comments, and format actions from
+  §§60–62 (it is the pre-§39 revision). Six Luddy tests (`luddyApproveButton`,
+  `luddyAdminDefaults`) fail for that reason. Not restored, since it was
+  changed on disk after the earlier edits; confirm which version is intended.

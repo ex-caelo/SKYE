@@ -43,10 +43,13 @@ export interface MountedView {
 export async function mountView(opts: MountViewOptions): Promise<MountedView> {
   const { container, graph, siteConfig, viewId, ctx, onStatus } = opts;
 
-  const status = document.createElement("div");
-  status.className = "skye-view__status";
+  // The same shared spinner the page-level loaders use (components/Loading.astro), cloned from a
+  // template in view.astro — a missing template is a loud error, not a silent unstyled fallback.
+  const loadingTemplate = container.ownerDocument.querySelector<HTMLTemplateElement>('template[data-tpl="view-loading"]');
+  if (!loadingTemplate) throw new Error('viewHost: missing <template data-tpl="view-loading"> in the view page.');
+  const status = loadingTemplate.content.firstElementChild!.cloneNode(true) as HTMLElement;
+  status.classList.add("skye-view__status");
   status.setAttribute("role", "status");
-  status.textContent = "Loading view…";
   container.appendChild(status);
 
   // Fetch the view's files first — but hold them until the handshake proves the wall is up.

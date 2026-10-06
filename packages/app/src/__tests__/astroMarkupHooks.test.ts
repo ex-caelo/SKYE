@@ -53,7 +53,7 @@ const EXPECTED: Record<string, string[]> = {
     'data-el="status"',
   ],
   "pages/index.astro": ['id="state-landing"', 'id="state-auth-error"', 'data-slot="error"', 'data-slot="description"'],
-  "pages/view.astro": ['id="screen-view"', 'data-slot="view-mount"', 'id="state-not-configured"', 'data-slot="title"', 'data-slot="body"', 'id="state-error"'],
+  "pages/view.astro": ['data-tpl="view-loading"', 'id="screen-view"', 'data-slot="view-mount"', 'id="state-not-configured"', 'data-slot="title"', 'data-slot="body"', 'id="state-error"'],
   "pages/form.astro": [
     'id="screen-form"',
     'data-slot="form-nav"',

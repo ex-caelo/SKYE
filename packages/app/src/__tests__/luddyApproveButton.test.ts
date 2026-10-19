@@ -3,6 +3,7 @@ import type { FormConfig } from "@skye/form-config";
 import { runButtonActions } from "../features/form/submit/runButtonActions.js";
 import { formatDateYMD } from "../integrations/util/formatDateYMD.js";
 import { formatDateTime } from "../integrations/util/formatDateTime.js";
+import { createEvent } from "../integrations/engage/createEvent.js";
 import type { RawGraphFetch } from "../shared/sharepoint/rawGraphFetch.js";
 import adminConfig from "../../../../skye_data/forms/luddy-llc-event-proposal/admin/form.config.json" with { type: "json" };
 
@@ -90,6 +91,15 @@ describe("luddy-llc-event-proposal admin overlay — Approve Event button", () =
     expect(graphFetch.mock.calls[0][0]).toContain("/items/9001/fields");
     expect(body).toEqual({ Status: "Approved", BeInvolved_x0020_Event_x0020_Id: "501", AttendanceScannerAccessCode: "CREATE01" });
 
+    // startsOn/endsOn must be the real UTC instant, not the raw naive datetime-local string — Engage
+    // treats an offset-less string as UTC, which previously shifted every BeInvolved event's
+    // displayed time by the Eastern UTC offset versus what SKYE itself shows for the same value.
+    // April 10/11 2026 are EDT (UTC-4), so 18:00 local is 22:00 UTC.
+    expect(callbacks.scriptActions["engage.createEvent"]).toHaveBeenCalledWith(
+      [expect.objectContaining({ startsOn: "2026-04-10T22:00:00.000Z", endsOn: "2026-04-11T22:00:00.000Z" })],
+      expect.anything()
+    );
+
     // The chat includes host + BOTH cohosts (array-spread) + reviewer — not a broken comma-joined string.
     expect(callbacks.scriptActions["teams.createChat"]).toHaveBeenCalledWith(
       [{ memberUserIds: ["host@iu.edu", "cohost1@iu.edu", "cohost2@iu.edu", "reviewer@iu.edu"], chatType: "group", topic: "2026.04.10 Spring Hackathon" }],
@@ -105,6 +115,28 @@ describe("luddy-llc-event-proposal admin overlay — Approve Event button", () =
     expect(facts.find((f: { title: string }) => f.title === "Location").value).toBe("Luddy Atrium");
   });
 
+  it("defaults the BeInvolved event to \"Invited users only\" visibility — the real engage.createEvent, not a stub, since this config no longer overrides visibility itself", async () => {
+    // The config used to hardcode visibility: "Institution" ("Students and staff at BeInvolved");
+    // that override was removed so new events fall through to engage.createEvent's own default
+    // ("Private" — "Invited users only" in Engage's UI). Runs the REAL createEvent action (not the
+    // usual stub) so this actually exercises that default end to end, with global fetch stubbed to
+    // stand in for the real BeInvolved proxy call.
+    const httpFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 501, name: "Spring Hackathon", accessCode: "CREATE01" }), { status: 200 }));
+    vi.stubGlobal("fetch", httpFetch);
+
+    const graphFetch = stubGraphFetch();
+    const callbacks = stubCallbacks({ "engage.createEvent": createEvent });
+
+    const result = await runButtonActions(approveButton, { ...baseFields, beInvolvedEventId: undefined }, { id: "9001" }, graphFetch, callbacks);
+
+    expect(result.errors).toEqual({});
+    const [, init] = httpFetch.mock.calls[0];
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.visibility).toBe("Private");
+
+    vi.unstubAllGlobals();
+  });
+
   it("re-approval (a BeInvolved event id already exists): PATCHes the existing event instead of creating a new one", async () => {
     const graphFetch = stubGraphFetch();
     const callbacks = stubCallbacks();
@@ -116,7 +148,10 @@ describe("luddy-llc-event-proposal admin overlay — Approve Event button", () =
     expect(result.outcomes.updateBeInvolvedEvent).toBe("ran");
     expect(result.outcomes.saveApprovalFieldsFromCreate).toBe("skipped");
 
-    expect(callbacks.scriptActions["engage.updateEvent"]).toHaveBeenCalledWith([expect.objectContaining({ eventId: "501" })], expect.anything());
+    expect(callbacks.scriptActions["engage.updateEvent"]).toHaveBeenCalledWith(
+      [expect.objectContaining({ eventId: "501", startsOn: "2026-04-10T22:00:00.000Z", endsOn: "2026-04-11T22:00:00.000Z" })],
+      expect.anything()
+    );
     expect(callbacks.setFieldValue).toHaveBeenCalledWith("attendanceCode", "UPDATE01");
 
     const body = JSON.parse((graphFetch.mock.calls[0][1] as RequestInit).body as string);

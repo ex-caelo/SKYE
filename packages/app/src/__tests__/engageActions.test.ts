@@ -82,6 +82,45 @@ describe("engage.createEvent", () => {
     expect(result).toEqual({ eventId: 42, name: "Kickoff", startsOn: "2026-09-01T14:00:00", endsOn: "2026-09-01T15:00:00" });
   });
 
+  it("defaults visibility to \"Private\" (Engage's \"Invited users only\") when the config doesn't specify one, rather than Engage's own default (\"Institution\" — \"Students and staff at BeInvolved\")", async () => {
+    const httpFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 42, name: "Kickoff" }), { status: 200 }));
+    await createEvent(
+      [
+        {
+          submittedByOrganizationId: 7,
+          submittedById: { campusEmail: "a@iu.edu" },
+          name: "Kickoff",
+          description: "Fall kickoff event",
+          startsOn: "2026-09-01T14:00:00",
+          endsOn: "2026-09-01T15:00:00",
+          address: { name: "Union" },
+        },
+      ],
+      makeContext(httpFetch)
+    );
+    expect(requestBody(httpFetch).visibility).toBe("Private");
+  });
+
+  it("honors an explicit visibility instead of the default", async () => {
+    const httpFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 42, name: "Kickoff" }), { status: 200 }));
+    await createEvent(
+      [
+        {
+          submittedByOrganizationId: 7,
+          submittedById: { campusEmail: "a@iu.edu" },
+          name: "Kickoff",
+          description: "Fall kickoff event",
+          startsOn: "2026-09-01T14:00:00",
+          endsOn: "2026-09-01T15:00:00",
+          address: { name: "Union" },
+          visibility: "Institution",
+        },
+      ],
+      makeContext(httpFetch)
+    );
+    expect(requestBody(httpFetch).visibility).toBe("Institution");
+  });
+
   it("passes through the response's accessCode (the attendance-scanner check-in code — confirmed present on Engage's real \"3.0-Event-PostPutResponse\" schema)", async () => {
     const httpFetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: 42, name: "Kickoff", startsOn: "2026-09-01T14:00:00", endsOn: "2026-09-01T15:00:00", accessCode: "AB12CD" }), { status: 200 })

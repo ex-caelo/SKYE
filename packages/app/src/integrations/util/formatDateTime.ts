@@ -38,6 +38,13 @@ function wallClockToInstant(naive: string, timeZone: string): Date {
 /**
  * Formats a date/time for display, e.g. "Oct 6, 2026, 7:00 PM EDT" for en-US in Eastern time.
  * Defaults to en-US and America/Indiana/Indianapolis, which is what SKYE's own event forms use.
+ * Also returns `isoInstant` — the real UTC instant (with a "Z" offset) the naive wall-clock value
+ * names in `timeZone`. A naive datetime-local string ("2026-10-18T17:00") has no timezone of its
+ * own, so handing it to an external API UNCONVERTED lets that API's own parser guess — e.g. Campus
+ * Labs Engage evidently treats an offset-less string as UTC, which silently shifted every BeInvolved
+ * event's displayed time by the Eastern UTC offset (4-5 hours) versus what SKYE itself shows for the
+ * same stored value. `isoInstant` is the fix: a config that needs to hand a date to a non-Graph API
+ * (Engage's `startsOn`/`endsOn`, so far) should use this field, not the raw `{{fields.x}}` value.
  * Registered as "util.formatDateTime" — see ../registry.ts.
  */
 export const formatDateTime: ScriptAction = async (args) => {
@@ -59,5 +66,5 @@ export const formatDateTime: ScriptAction = async (args) => {
     minute: "2-digit",
     timeZoneName: "short",
   }).format(instant);
-  return { formatted };
+  return { formatted, isoInstant: instant.toISOString() };
 };

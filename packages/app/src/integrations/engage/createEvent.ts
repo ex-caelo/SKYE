@@ -39,6 +39,14 @@ export interface CreateEngageEventOptions {
   organizationIds?: number[];
   categoryIds?: number[];
   imageUrl?: string;
+  /**
+   * Who can see the event in BeInvolved/Engage. Defaults to `"Private"` ("Invited users only" in
+   * Engage's own UI) when omitted — NOT Engage's own default of `"Institution"` ("Students and
+   * staff at BeInvolved"), which a config author must opt into explicitly by setting this. Confirmed
+   * mapping (Engage's raw OpenAPI spec gives only the enum names, no UI labels): "Public" = The
+   * Public, "Institution" = Students and staff at [BeInvolved/Engage], "Organization" = Organization
+   * members/roster, "Private" = Invited users only.
+   */
   visibility?: "Public" | "Institution" | "Organization" | "Private";
 }
 
@@ -69,7 +77,7 @@ export const createEvent: ScriptAction = async (args, ctx) => {
       organizationIds: options.organizationIds,
       categoryIds: options.categoryIds,
       imageUrl: options.imageUrl,
-      visibility: options.visibility,
+      visibility: options.visibility ?? "Private",
     },
   }, options.organizationId);
 

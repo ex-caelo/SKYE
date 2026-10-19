@@ -48,8 +48,9 @@ import { formatDateTime } from "../integrations/util/formatDateTime.js";
 describe("util.formatDateTime", () => {
   it("formats a naive datetime-local value as en-US, Eastern time, read as Indianapolis wall-clock time", async () => {
     // Oct 6 2026 is EDT (UTC-4), so 19:00 local is 23:00 UTC — and must display as 7:00 PM EDT.
-    const result = (await formatDateTime([{ date: "2026-10-06T19:00" }], makeContext())) as { formatted: string };
+    const result = (await formatDateTime([{ date: "2026-10-06T19:00" }], makeContext())) as { formatted: string; isoInstant: string };
     expect(result.formatted).toBe("Oct 6, 2026, 7:00 PM EDT");
+    expect(result.isoInstant).toBe("2026-10-06T23:00:00.000Z");
   });
 
   it("gives the same answer regardless of the process's own timezone", async () => {

@@ -4058,3 +4058,113 @@ original element is genuinely gone, not just visually covered.
   scrollbar returns. Applies to forms and `/view`, since `view.css`'s own body
   padding is overridden by the more specific rule.
 - Verified: build succeeds. Not checked in a browser; the Chrome extension is unavailable.
+
+## 69. BeInvolved event times were 4 hours off from what SKYE itself shows
+
+**User report**: the UNO event on `openskye.app` showed 17:00–18:00, but the
+same event in BeInvolved (Campus Labs Engage) showed 13:00–14:00 — a
+constant 4-hour gap, i.e. exactly the Eastern (EDT, UTC-4) offset.
+
+**Root cause**: the Luddy admin "Approve Event" button's
+`createBeInvolvedEvent`/`updateBeInvolvedEvent` actions
+(`skye_data/forms/luddy-llc-event-proposal/admin/form.config.json`) sent
+Engage's `startsOn`/`endsOn` as the raw `{{fields.startTime}}`/
+`{{fields.endTime}}` template values — the exact naive `datetime-local`
+string the host typed in (e.g. `"2026-10-18T17:00"`, no timezone), meant as
+Eastern wall-clock time. Engage's API evidently treats an offset-less
+date-time string as UTC rather than guessing a timezone, so it stored
+17:00 **UTC**, which displays as 13:00 **Eastern** — the exact 4-hour shift
+reported. This is a real app-level bug, not an Engage account issue: the
+app was handing an ambiguous string to an API that resolves the ambiguity
+differently than SKYE's own display code does (`mapSharePointFieldsToValues`/
+the calendar view both correctly convert UTC↔local — see the "Date/time
+values" section of CLAUDE.md — but this one write path never went through
+that conversion at all).
+
+**Fix**: `util.formatDateTime` (`src/integrations/util/formatDateTime.ts`)
+already computed the correct UTC instant internally (via its existing
+`wallClockToInstant`, used for formatting the approval Adaptive Card's
+displayed date/time) but only returned a human-readable `formatted` string.
+It now also returns `isoInstant` — that same instant as a real ISO 8601
+string with a `Z` offset. The admin config's `createBeInvolvedEvent`/
+`updateBeInvolvedEvent` actions (which already run `formatCardStart`/
+`formatCardEnd` — the same `util.formatDateTime` calls — for the card) now
+depend on those two actions and send `startsOn`/`endsOn` as
+`{{results.formatCardStart.isoInstant}}`/`{{results.formatCardEnd.isoInstant}}`
+instead of the raw naive field values. `formatCardStart`/`formatCardEnd`
+have no `when` gate, so both the create and update branches can safely
+depend on them without affecting the existing mutually-exclusive-branch
+skip semantics documented elsewhere in this file.
+
+**General lesson, same as the existing "always-UTC Graph" note**: a naive
+`datetime-local` value has no timezone of its own — handing it unconverted
+to ANY external API (not just Graph) lets that API's own parser decide
+what "no offset" means, which may not match what SKYE's own UI assumes.
+Any future config wiring a date/time field into a non-Graph API should use
+`util.formatDateTime`'s `isoInstant`, not the raw `{{fields.x}}` value.
+
+- 1 new assertion in `utilActions.test.ts` (`isoInstant` for a known
+  EDT instant). 2 new assertions in `luddyApproveButton.test.ts` pinning
+  `startsOn`/`endsOn` to the correct UTC instant for both the create and
+  update branches (previously unchecked — the bug would not have failed
+  either test before this).
+- Verified: full test suite passes (561/563 — the 2 failures are
+  pre-existing and unrelated, in `registerElements.test.ts`'s
+  `skye-lookup-table` remove-button tests, untouched by this change).
+  `pnpm lint:configs` passes on the edited config. Typecheck and build both
+  clean. Not checked against the real Engage API/UI — no live-tenant
+  re-approval has been run since this fix.
+
+## 70. `engage.createEvent` now defaults BeInvolved visibility to "Invited users only"
+
+**User ask**: all events created via `engage.createEvent` should default to
+Engage's "Invited users only" visibility instead of "Students and staff at
+BeInvolved" — a config should only get something looser by explicitly
+setting `visibility` itself. Confirmed the Luddy LLC event form follows
+this.
+
+**Enum mapping, confirmed (not guessed)**: Engage's raw OpenAPI spec
+(`https://engage-api.campuslabs.com/swagger/swagger.json`) only gives the
+bare enum names (`Public`/`Institution`/`Organization`/`Private`), no UI
+labels — pulled directly per CLAUDE.md's existing rule on this integration,
+not a summarized reading. The UI labels were confirmed via Campus Labs
+Engage's own published help docs (multiple schools' Engage guides, e.g.
+Anthology's "Creating a new event" help page): `Public` = "The Public",
+`Institution` = "Students and staff at [Engage/BeInvolved]", `Organization`
+= "Organization members/roster", `Private` = "Invited users only" — the
+same order the spec lists them in, and consistent with the News Article
+schema's own `privateVisibilityPositionIds` field ("positions that can
+view this... if Visibility is `Private`"), which only makes sense if
+`Private` means a restricted/invited-only audience.
+
+**Fix**: `engage/createEvent.ts` now sends `visibility: options.visibility
+?? "Private"` instead of passing `options.visibility` through unchanged
+(which left the key out of the request entirely when unset, letting
+Engage apply its own default of `Institution`). `updateEvent.ts` was
+deliberately NOT changed — its PATCH-based `buildReplacePatch` already
+treats an unset `visibility` as "don't touch it" (correct: a re-approval
+shouldn't silently reset an event's visibility if someone changed it
+directly in Engage), so defaulting there would force every update to
+re-assert `Private` even over a deliberate manual change.
+
+**Luddy LLC verification**: the admin config's `createBeInvolvedEvent`
+action used to hardcode `"visibility": "Institution"` in its `args`,
+overriding the (then-nonexistent) default. That override is removed —
+the action's args no longer mention `visibility` at all, so it now falls
+through to `engage.createEvent`'s new default. `updateBeInvolvedEvent` was
+already not setting `visibility`, unaffected either way.
+
+- 2 new tests in `engageActions.test.ts` (defaults to `"Private"` with no
+  `visibility` supplied; an explicit `visibility` still wins).
+- 1 new test in `luddyApproveButton.test.ts`, deliberately running the
+  REAL `engage.createEvent` (not the usual stub) with global `fetch`
+  stubbed to stand in for the BeInvolved proxy call — confirms the real
+  config + the real action together actually produce
+  `visibility: "Private"` end to end, not just that each piece is correct
+  in isolation.
+- Verified: 564/566 tests pass (the 2 failures are pre-existing,
+  unrelated `registerElements.test.ts` lookup-table issues, untouched by
+  this change). `pnpm lint:configs` passes on the edited config.
+  Typecheck and build both clean.
+
+Sources consulted for the visibility-label mapping: [Anthology Engage — Creating a new event in your organization](https://help.anthology.com/engage/en/creating-a-new-event-in-your-organization.html), [University of Iowa — Event/Meeting Planning](https://leadandengage.uiowa.edu/student-organizations/manage/eventmeeting-planning), [EKU Engage Guides — Event](https://files.eku.edu/public/StudentAffairs/RSO/EngageGuides-Event.pdf).

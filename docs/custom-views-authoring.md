@@ -136,6 +136,22 @@ Returns a `data:` URI for an image stored in (or linked from) a list
 item's field — assign it straight to `img.src`. Rejects if the field
 isn't a column on the list.
 
+### `await skye.download(name, id, field, filename)`
+Saves a file field's bytes (same resolution as `skye.image` — an embedded
+image column, or a column that just links to a file elsewhere in the
+site's document libraries) to the viewer's own device, as a real
+browser download. Unlike `skye.image`, the file's bytes/content-type
+**never reach your view at all** — the host fetches them and triggers the
+save itself, so `filename` is a **base name only, no extension**: the
+host appends whichever one actually matches the file it resolved
+(`.jpg`/`.png`/`.pdf`/…). `filename` can't contain a path separator.
+Resolves once the host has triggered the save, same as clicking an
+`<a download>` on any ordinary page.
+
+```js
+await skye.download("Events", eventId, "PosterUrl", `${title} - Poster`);
+```
+
 ### `await skye.navigate(target)`
 Sends the viewer somewhere. `target` is exactly one of:
 

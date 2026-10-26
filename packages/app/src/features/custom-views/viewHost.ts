@@ -8,7 +8,7 @@
 // message it.
 
 import type { GraphClient } from "../../shared/sharepoint/types.js";
-import { createViewApi, type ViewApiContext } from "./messageApi.js";
+import { createViewApi, type ViewApiContext, type DownloadDecision } from "./messageApi.js";
 import type { NavigationDecision } from "./navigationPolicy.js";
 import type { SkyeSiteConfig } from "../../shared/site-config.js";
 import runtimeSource from "./view-runtime.js?raw";
@@ -101,6 +101,26 @@ export async function mountView(opts: MountViewOptions): Promise<MountedView> {
         // New tab, fully severed from this page — the SKYE app is never navigated away.
         window.open(decision.url, "_blank", "noopener,noreferrer");
       }
+    },
+    // Runs entirely in this TRUSTED top page, never in the sandboxed frame — a plain Blob + <a
+    // download> click, the standard way to trigger a real save-as from script. Revoked on a delay
+    // (not immediately) since some browsers resolve the download asynchronously after .click()
+    // returns; a bulk multi-file download may also prompt the viewer to allow multiple downloads —
+    // that's the browser's own built-in protection against download spam, not something to route around.
+    download: (decision: DownloadDecision) => {
+      // TS's DOM lib types a Uint8Array's `.buffer` as ArrayBufferLike (which also covers
+      // SharedArrayBuffer), narrower than BlobPart's real, broader runtime acceptance of any typed
+      // array — same real TS/DOM-lib type gap page-scripts/form.ts's own file-preview code already
+      // works around, not an unsafe runtime cast.
+      const blob = new Blob([decision.bytes as BlobPart], { type: decision.contentType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = decision.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
     },
   });
 

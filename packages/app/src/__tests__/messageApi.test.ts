@@ -29,11 +29,12 @@ function fakeGraph(overrides: Partial<GraphClient> = {}): GraphClient {
   return Object.assign(base, overrides);
 }
 
-function makeApi(graph = fakeGraph(), navigate = vi.fn()) {
+function makeApi(graph = fakeGraph(), navigate = vi.fn(), download = vi.fn()) {
   return {
-    api: createViewApi({ graph, siteConfig, ctx: { siteId: "s1", applicationId: "a1" }, navigate }),
+    api: createViewApi({ graph, siteConfig, ctx: { siteId: "s1", applicationId: "a1" }, navigate, download }),
     graph,
     navigate,
+    download,
   };
 }
 
@@ -111,6 +112,7 @@ describe("createViewApi dispatch", () => {
       siteConfig: { ...siteConfig, views: { allowedLists: ["Events", "SecretHRList"] } },
       ctx: { siteId: "s1", applicationId: "a1" },
       navigate: vi.fn(),
+      download: vi.fn(),
     });
     await expect(api.handle("skye:list", { name: "SecretHRList", query: {} })).rejects.toThrow(/not found/);
   });
@@ -125,6 +127,46 @@ describe("createViewApi dispatch", () => {
     const uri = await api.handle("skye:image", { name: "Events", id: "1", field: "Poster" });
     expect(uri).toBe("data:image/png;base64,AQID");
     await expect(api.handle("skye:image", { name: "Events", id: "1", field: "../etc" })).rejects.toMatchObject({ code: "unknownField" });
+  });
+
+  it("skye:download resolves the field to bytes via Graph and hands them to the host's download effect — never returning the bytes to the caller", async () => {
+    const { api, graph, download } = makeApi();
+    const res = await api.handle("skye:download", { name: "Events", id: "1", field: "Poster", filename: "poster" });
+    expect(graph.getListItemImage).toHaveBeenCalledWith("s1", "Events", "1", "Poster");
+    expect(download).toHaveBeenCalledWith({ bytes: new Uint8Array([1, 2, 3]), contentType: "image/png", filename: "poster.png" });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it("skye:download appends the extension matching the resolved file's real content type — the view can't know this itself, since the bytes/content-type never reach it", async () => {
+    const graph = fakeGraph({ getListItemImage: vi.fn(async () => ({ contentType: "application/pdf", bytes: new Uint8Array([9]) })) });
+    const { api, download } = makeApi(graph);
+    await api.handle("skye:download", { name: "Events", id: "1", field: "Poster", filename: "flyer" });
+    expect(download).toHaveBeenCalledWith({ bytes: new Uint8Array([9]), contentType: "application/pdf", filename: "flyer.pdf" });
+  });
+
+  it("skye:download rejects an unknown field and does not call the download effect", async () => {
+    const { api, download } = makeApi();
+    await expect(api.handle("skye:download", { name: "Events", id: "1", field: "../etc", filename: "x.png" })).rejects.toMatchObject({
+      code: "unknownField",
+    });
+    expect(download).not.toHaveBeenCalled();
+  });
+
+  it("skye:download rejects a filename with a path separator (can't be smuggled into the saved file's path) and does not call Graph", async () => {
+    const { api, graph, download } = makeApi();
+    await expect(api.handle("skye:download", { name: "Events", id: "1", field: "Poster", filename: "../../etc/passwd" })).rejects.toMatchObject({
+      code: "badFilename",
+    });
+    expect(graph.getListItemImage).not.toHaveBeenCalled();
+    expect(download).not.toHaveBeenCalled();
+  });
+
+  it("skye:download rejects a non-allowlisted list before calling Graph", async () => {
+    const { api, graph } = makeApi();
+    await expect(api.handle("skye:download", { name: "SecretHRList", id: "1", field: "Poster", filename: "x.png" })).rejects.toMatchObject({
+      code: "listNotAllowed",
+    });
+    expect(graph.getListItemImage).not.toHaveBeenCalled();
   });
 
   it("skye:navigate resolves the policy and invokes the host navigate callback", async () => {

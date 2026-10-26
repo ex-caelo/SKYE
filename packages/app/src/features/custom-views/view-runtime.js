@@ -172,6 +172,13 @@
     // returns a data: URI, ready for an <img src>.
     image: (name, id, field) => call("skye:image", { name, id, field }),
 
+    // Saves a file field's bytes to the viewer's own device via the host's own save-as effect —
+    // the bytes never pass through this frame at all, so `filename` is a BASE name only (no
+    // extension) — the host appends whichever one actually matches the resolved file's real
+    // content type. Resolves once the host has triggered the save (not once the viewer's browser
+    // has finished writing it — same as a normal <a download> click from any other page).
+    download: (name, id, field, filename) => call("skye:download", { name, id, field, filename }),
+
     // Host-mediated navigation. target is exactly one of:
     //   { view: "<id>", params? }              -> another view on this site
     //   { form: "<id>", itemId?, mode?, params? } -> a form on this site

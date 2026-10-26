@@ -74,11 +74,24 @@ function encodeLookupTableRowFields(
  * lives on the PRIMARY item's own lookup column value, which is written as
  * part of the primary item's normal field mapping, so there's nothing
  * extra to do here for that mode (see the schema's own `linkMode`
- * description).
+ * description). Rows are untouched and returned as-is in that mode (not
+ * `[]`) so a caller that always re-seeds a control's `.value` from this
+ * return value doesn't wipe out rows it never had anything to do with.
  *
  * Requires `parentItemId` to already exist — this is why lookupTable row
  * writes happen after the primary item write in submitForm.ts, not before
  * (a brand-new item has no ID for rows to reference yet).
+ *
+ * Returns the canonical post-write row list: a created row comes back with
+ * its real server-assigned `id` (critical — without this, saving the SAME
+ * rows again, whether via another `writeLookupTableRows` call or the
+ * lookupTable control's own "Save rows" button, would see them as
+ * id-less and re-create duplicates instead of updating); a deleted row is
+ * dropped entirely, matching the SkyeLookupTable's own "a never-saved row
+ * that's removed client-side is just dropped" convention. Callers that
+ * keep a live in-memory copy of these rows (the lookupTable control, this
+ * form's `values` cache) should replace their copy with this return value
+ * after a successful write.
  */
 export async function writeLookupTableRows(
   graph: GraphClient,
@@ -86,8 +99,8 @@ export async function writeLookupTableRows(
   table: LookupTable,
   parentItemId: string,
   rows: LookupTableRow[]
-): Promise<void> {
-  if (table.linkMode !== "parentReference") return;
+): Promise<LookupTableRow[]> {
+  if (table.linkMode !== "parentReference") return rows;
   if (!table.parentReferenceColumn) throw new Error("parentReference linkMode requires parentReferenceColumn.");
 
   const relatedSiteId = table.relatedList.siteId ?? siteId;
@@ -116,11 +129,13 @@ export async function writeLookupTableRows(
     }
   }
 
+  const written: LookupTableRow[] = [];
+
   for (const row of rows) {
     if (row.deleted) {
       // A deleted row with no id was never saved server-side in the first place — nothing to do.
       if (row.id) await graph.deleteListItem(relatedSiteId, relatedListId, row.id);
-      continue;
+      continue; // dropped from the returned list either way — see this function's own doc comment
     }
 
     const { fields: encodedRowFields, needsBetaApiVersion } = encodeLookupTableRowFields(table.columns, row.values, relatedColumnsByName);
@@ -129,8 +144,12 @@ export async function writeLookupTableRows(
 
     if (row.id) {
       await graph.updateListItem(relatedSiteId, relatedListId, row.id, sharepointFields, undefined, writeOptions);
+      written.push(row);
     } else {
-      await graph.createListItem(relatedSiteId, relatedListId, sharepointFields, writeOptions);
+      const created = await graph.createListItem(relatedSiteId, relatedListId, sharepointFields, writeOptions);
+      written.push({ id: created.id, values: row.values });
     }
   }
+
+  return written;
 }

@@ -423,15 +423,96 @@ class SkyeLookupPicker extends SkyeSearchPicker<LookupItemResult> {
  * nested visibleIf/validation yet, see TODO), with add/remove controls.
  * `.tableConfig` is set externally by fieldRegistry's configureElement
  * hook right after creation, same pattern as lookupPicker's `.relatedList`.
+ *
+ * **Rows are NOT written to SharePoint as they're edited.** A `lookupTable`
+ * field's rows live on a different list than the primary item, and writing
+ * them needs the primary item's own id (see lookupTableRows.ts) — so for a
+ * brand-new item there's nothing to write TO yet regardless. The ONLY
+ * built-in way rows reach SharePoint is the whole-form Submit button
+ * (submitForm.ts's own writeLookupTableRows call, after the primary item
+ * write). A real, live bug this caused: a `controlType: "button"` field's
+ * own action chain (e.g. the Luddy admin form's "Approve Event" button —
+ * see runButtonActions.ts) runs a SEPARATE, button-scoped set of actions
+ * that never touches lookupTable rows at all — so an admin who edited this
+ * table and then clicked Approve Event instead of Submit lost those edits
+ * silently, with no error and no indication anything was wrong. Confirmed
+ * live: a row added, then "saved" via Approve Event, was gone on reload;
+ * the SAME row added and saved via the real Submit button persisted
+ * correctly. Two things fix this:
+ * 1. **A "Save rows" button on the table itself** — dispatches
+ *    `skye-lookup-table-save` (bubbles/composed, `detail: { fieldKey }`)
+ *    instead of writing directly (this element has no Graph access, same
+ *    "renderForm doesn't know about Graph" split as `submitButton` — see
+ *    renderForm.ts's own doc comment). `page-scripts/form.ts` listens on
+ *    the form root, calls the real `writeLookupTableRows`, and reports the
+ *    result back via `markSaved`/`markSaveFailed` below — so a user who
+ *    knows they're about to click something OTHER than Submit (Approve
+ *    Event, or any other button field) can save the table explicitly
+ *    first and know it actually happened.
+ * 2. **Unsaved-row tracking** (`dirty`) so a form-wide "you're about to
+ *    lose unsaved changes" guard (`beforeunload`, wired in form.ts) can
+ *    actually detect this specific case — see `dirty`'s own comment.
  */
 class SkyeLookupTable extends SkyeValueElement {
   tableConfig?: LookupTable;
   private tbody?: HTMLTableSectionElement;
+  private statusEl?: HTMLOutputElement;
+  private saveButton?: HTMLButtonElement;
+  /** JSON snapshot of the rows as of the last successful save (or initial seed) — see `dirty`. */
+  private savedSnapshot = "[]";
+  private saving = false;
 
   connectedCallback() {
     this.classList.add("skye-lookup-table");
     if (!Array.isArray(this._value)) this._value = [];
+    this.savedSnapshot = JSON.stringify(this._value);
     this.render();
+  }
+
+  /**
+   * Overridden (base class's default setter, mirrored here) so an external SEED — an edit-mode
+   * load, or this form's own re-prefill — resets the "last saved" snapshot too. Without this, a
+   * freshly-loaded table (genuinely unedited) would read as dirty against the base class's empty
+   * initial snapshot the instant any row existed at all.
+   */
+  set value(v: unknown) {
+    this._value = v;
+    this.savedSnapshot = JSON.stringify(Array.isArray(v) ? v : []);
+    this.render();
+  }
+  get value(): unknown {
+    return this._value;
+  }
+
+  /**
+   * True when the table's current rows differ from what was last confirmed saved (by a "Save
+   * rows" click, or a whole-form Submit — see `markSaved`). A snapshot comparison rather than a
+   * manually-toggled flag: self-correcting (add a row then remove it again and this naturally
+   * goes back to false) and needs no separate bookkeeping on every edit path (cell input, add,
+   * remove all already funnel through `setRows`/`this._value`). Read by `page-scripts/form.ts`'s
+   * `beforeunload` guard (via `RenderedForm.hasDirtyLookupTables`) and by this element's own
+   * render to show "Unsaved changes" next to the Save button.
+   */
+  get dirty(): boolean {
+    return JSON.stringify(this.rows) !== this.savedSnapshot;
+  }
+
+  /** Called by the host after a successful write (the table's own "Save rows", or a whole-form Submit) — see this class's own doc comment. */
+  markSaved(rows: LookupTableRow[]): void {
+    this._value = rows;
+    this.savedSnapshot = JSON.stringify(rows);
+    this.saving = false;
+    this.render();
+  }
+
+  /** Called by the host when a "Save rows" write (NOT a whole-form Submit, which has its own status UI) fails — rows are left exactly as the user had them, nothing is discarded. */
+  markSaveFailed(message: string): void {
+    this.saving = false;
+    this.render();
+    if (this.statusEl) {
+      this.statusEl.textContent = message;
+      this.statusEl.dataset.level = "error";
+    }
   }
 
   private get rows(): LookupTableRow[] {
@@ -451,6 +532,12 @@ class SkyeLookupTable extends SkyeValueElement {
       return;
     }
 
+    // Same source `fieldRegistry.ts`'s `mapAttributes` already writes this from (field.readonly) —
+    // view mode force-sets every non-button field readonly (see page-scripts/form.ts), and this
+    // element previously never actually checked it, so the Purchase Table stayed fully editable
+    // even while just VIEWING a saved item. Gates every mutating control below.
+    const isReadonly = this.hasAttribute("readonly");
+
     const columns = Object.entries(this.tableConfig.columns).sort(([, a], [, b]) => (a.order ?? Infinity) - (b.order ?? Infinity));
 
     const table = document.createElement("table");
@@ -461,7 +548,7 @@ class SkyeLookupTable extends SkyeValueElement {
       th.textContent = col.label ?? "";
       headRow.appendChild(th);
     }
-    headRow.appendChild(document.createElement("th")); // actions column
+    if (!isReadonly) headRow.appendChild(document.createElement("th")); // actions column
     thead.appendChild(headRow);
     table.appendChild(thead);
 
@@ -474,6 +561,13 @@ class SkyeLookupTable extends SkyeValueElement {
       const tr = document.createElement("tr");
       for (const [colKey, col] of columns) {
         const td = document.createElement("td");
+
+        if (isReadonly) {
+          td.textContent = row.values[colKey] !== undefined ? String(row.values[colKey]) : "";
+          tr.appendChild(td);
+          continue;
+        }
+
         const input = col.controlType === "select" ? document.createElement("select") : document.createElement("input");
 
         if (input instanceof HTMLSelectElement) {
@@ -507,28 +601,36 @@ class SkyeLookupTable extends SkyeValueElement {
         tr.appendChild(td);
       }
 
-      const actionsCell = document.createElement("td");
-      const removeButton = document.createElement("button");
-      removeButton.type = "button";
-      removeButton.textContent = "×";
-      removeButton.addEventListener("click", () => {
-        if (this.tableConfig?.allowDelete === false) return;
-        if (row.id) {
-          // Existing (already-saved) row: mark deleted and keep it in the array so submitForm
-          // actually issues a server-side delete — see writeLookupTableRows.
-          this.setRows(this.rows.map((r, i) => (i === rowIndex ? { ...r, deleted: true } : r)));
-        } else {
-          // Never saved server-side — nothing to delete remotely, just drop it.
-          this.setRows(this.rows.filter((_, i) => i !== rowIndex));
-        }
-      });
-      actionsCell.appendChild(removeButton);
-      tr.appendChild(actionsCell);
+      if (!isReadonly) {
+        const actionsCell = document.createElement("td");
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.textContent = "×";
+        removeButton.disabled = this.tableConfig?.allowDelete === false;
+        removeButton.addEventListener("click", () => {
+          if (this.tableConfig?.allowDelete === false) return;
+          if (row.id) {
+            // Existing (already-saved) row: mark deleted and keep it in the array so submitForm
+            // actually issues a server-side delete — see writeLookupTableRows.
+            this.setRows(this.rows.map((r, i) => (i === rowIndex ? { ...r, deleted: true } : r)));
+          } else {
+            // Never saved server-side — nothing to delete remotely, just drop it.
+            this.setRows(this.rows.filter((_, i) => i !== rowIndex));
+          }
+        });
+        actionsCell.appendChild(removeButton);
+        tr.appendChild(actionsCell);
+      }
 
       this.tbody!.appendChild(tr);
     });
     table.appendChild(this.tbody);
     this.appendChild(table);
+
+    if (isReadonly) return;
+
+    const controls = document.createElement("div");
+    controls.className = "skye-lookup-table__controls";
 
     if (this.tableConfig.allowAdd !== false) {
       const maxRows = this.tableConfig.maxRows;
@@ -537,8 +639,37 @@ class SkyeLookupTable extends SkyeValueElement {
       addButton.textContent = "Add row";
       addButton.disabled = maxRows !== undefined && visibleRows.length >= maxRows;
       addButton.addEventListener("click", () => this.setRows([...this.rows, { values: {} }]));
-      this.appendChild(addButton);
+      controls.appendChild(addButton);
     }
+
+    this.saveButton = document.createElement("button");
+    this.saveButton.type = "button";
+    this.saveButton.textContent = this.saving ? "Saving…" : "Save rows";
+    this.saveButton.disabled = this.saving || !this.dirty;
+    this.saveButton.addEventListener("click", () => {
+      if (this.saving) return;
+      this.saving = true;
+      if (this.statusEl) {
+        this.statusEl.textContent = "";
+        this.statusEl.removeAttribute("data-level");
+      }
+      this.render();
+      this.dispatchEvent(new CustomEvent("skye-lookup-table-save", { bubbles: true, composed: true, detail: { fieldKey: this.dataset.fieldKey } }));
+    });
+    controls.appendChild(this.saveButton);
+
+    if (this.dirty) {
+      const unsavedNote = document.createElement("span");
+      unsavedNote.className = "skye-lookup-table__unsaved-note";
+      unsavedNote.textContent = "Unsaved changes — not saved until you click “Save rows” or submit the whole form.";
+      controls.appendChild(unsavedNote);
+    }
+
+    this.appendChild(controls);
+
+    this.statusEl = document.createElement("output");
+    this.statusEl.className = "skye-lookup-table__status";
+    this.appendChild(this.statusEl);
   }
 }
 

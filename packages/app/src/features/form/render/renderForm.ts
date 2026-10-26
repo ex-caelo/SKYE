@@ -5,6 +5,7 @@ import { getControlDefinition } from "./fieldRegistry.js";
 import { applyPageLayout } from "./layoutEngine.js";
 import { validateFormValues } from "../validateFormValues.js";
 import { renderFilePreview } from "./fileUploadZone.js";
+import type { LookupTableRow } from "../submit/lookupTableRows.js";
 
 export interface RenderedForm {
   root: HTMLElement;
@@ -46,6 +47,24 @@ export interface RenderedForm {
    * dropping the value. Any subsequent field edit clears them.
    */
   setExternalErrors: (errors: Record<string, string>) => void;
+  /**
+   * True when any `lookupTable` field has rows that differ from what was last confirmed saved
+   * (that field's own `SkyeLookupTable.dirty` — see registerElements.ts). Used by
+   * page-scripts/form.ts's `beforeunload` guard: a lookupTable's own rows are the one kind of
+   * edit in this app that can be silently lost on navigation (see that class's own doc comment
+   * for the real bug this covers), so this is scoped to lookupTable fields specifically rather
+   * than "any field has unsaved input" — every other field's value already lives in `values` and
+   * is captured by whichever submit path the caller uses.
+   */
+  hasDirtyLookupTables: () => boolean;
+  /**
+   * Updates one `lookupTable` field's control with its post-write row list (real ids on created
+   * rows, deletions dropped) and clears its "unsaved changes" state — called by
+   * page-scripts/form.ts after EITHER that field's own "Save rows" click succeeds, or a
+   * whole-form Submit succeeds (submitForm.ts's own `SubmitResult.lookupTableRows`). A no-op if
+   * the field key doesn't resolve to a mounted lookupTable control.
+   */
+  markLookupTableSaved: (fieldKey: string, rows: LookupTableRow[]) => void;
 }
 
 export interface RenderFormOptions {
@@ -490,6 +509,15 @@ export function renderForm(config: FormConfig, document: Document, options: Rend
       const ok = validateFormValues(config, values, options.customValidators ?? {}).length === 0;
       if (!ok) focusFirstError();
       return ok;
+    },
+    hasDirtyLookupTables: () =>
+      Array.from(renderedFields.values()).some(
+        ({ field, rendered }) => field.controlType === "lookupTable" && (rendered.control as unknown as { dirty?: boolean }).dirty === true
+      ),
+    markLookupTableSaved: (fieldKey, rows) => {
+      const entry = renderedFields.get(fieldKey);
+      if (entry?.field.controlType !== "lookupTable") return;
+      (entry.rendered.control as unknown as { markSaved: (rows: LookupTableRow[]) => void }).markSaved(rows);
     },
     setExternalErrors: (errs) => {
       externalErrors.clear();

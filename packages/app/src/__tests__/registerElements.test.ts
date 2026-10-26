@@ -267,7 +267,7 @@ describe("skye-lookup-table", () => {
     ];
     document.body.appendChild(el);
 
-    const removeButtons = Array.from(el.querySelectorAll("button")).filter((b) => b.textContent === "Remove");
+    const removeButtons = Array.from(el.querySelectorAll("button")).filter((b) => b.textContent === "×");
     removeButtons[0].click();
 
     // Still 2 entries in .value (so submitForm can issue the delete), but the first is now flagged deleted...
@@ -286,7 +286,7 @@ describe("skye-lookup-table", () => {
     el.value = [{ values: { guestName: "Alex" } }]; // no `id` — never saved server-side
     document.body.appendChild(el);
 
-    const removeButton = Array.from(el.querySelectorAll("button")).find((b) => b.textContent === "Remove")!;
+    const removeButton = Array.from(el.querySelectorAll("button")).find((b) => b.textContent === "×")!;
     removeButton.click();
 
     expect(el.value).toEqual([]);
@@ -304,6 +304,102 @@ describe("skye-lookup-table", () => {
     input.dispatchEvent(new Event("input"));
 
     expect(el.value).toEqual([{ values: { guestName: "Alexandra" } }]);
+    el.remove();
+  });
+
+  // --- "Save rows" / unsaved-changes tracking — added fixing a real live bug: a controlType
+  // "button" action chain (e.g. the Luddy admin form's "Approve Event") never wrote lookupTable
+  // rows at all (only the whole-form Submit does), so an admin who edited this table and then
+  // used that button instead of Submit lost those edits with no error. See this class's own
+  // doc comment in registerElements.ts for the full story. ---
+  type LookupTableEl = HTMLElement & {
+    tableConfig?: LookupTable;
+    value: unknown;
+    dirty: boolean;
+    markSaved: (rows: unknown) => void;
+    markSaveFailed: (message: string) => void;
+  };
+
+  it("is not dirty right after being seeded with existing rows — only actual edits make it dirty", () => {
+    const el = document.createElement("skye-lookup-table") as LookupTableEl;
+    el.tableConfig = table;
+    el.value = [{ id: "row-1", values: { guestName: "Alex" } }];
+    document.body.appendChild(el);
+
+    expect(el.dirty).toBe(false);
+    el.remove();
+  });
+
+  it("becomes dirty after Add row, typing in a cell, or Remove — and clean again once markSaved confirms the write", () => {
+    const el = document.createElement("skye-lookup-table") as LookupTableEl;
+    el.tableConfig = table;
+    document.body.appendChild(el);
+    expect(el.dirty).toBe(false);
+
+    const addButton = Array.from(el.querySelectorAll("button")).find((b) => b.textContent === "Add row")!;
+    addButton.click();
+    expect(el.dirty).toBe(true);
+
+    const confirmedRows = el.value as unknown[];
+    el.markSaved(confirmedRows);
+    expect(el.dirty).toBe(false);
+    el.remove();
+  });
+
+  it('clicking "Save rows" dispatches skye-lookup-table-save with this field\'s key, and disables the button until markSaved/markSaveFailed resolves it', () => {
+    const el = document.createElement("skye-lookup-table") as LookupTableEl;
+    el.tableConfig = table;
+    el.dataset.fieldKey = "purchaseTable";
+    document.body.appendChild(el);
+
+    const addButton = Array.from(el.querySelectorAll("button")).find((b) => b.textContent === "Add row")!;
+    addButton.click(); // dirty, so the Save button is actually enabled
+
+    const saveHandler = vi.fn();
+    el.addEventListener("skye-lookup-table-save", saveHandler);
+    const saveButton = Array.from(el.querySelectorAll("button")).find((b) => b.textContent === "Save rows") as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(false);
+    saveButton.click();
+
+    expect(saveHandler).toHaveBeenCalledTimes(1);
+    expect((saveHandler.mock.calls[0][0] as CustomEvent).detail).toEqual({ fieldKey: "purchaseTable" });
+    // Re-queries after the click's own re-render (saving state) — the ORIGINAL button reference's
+    // `.disabled` wouldn't reflect a freshly-created replacement element.
+    const savingButton = Array.from(el.querySelectorAll("button")).find((b) => b.textContent === "Saving…") as HTMLButtonElement;
+    expect(savingButton.disabled).toBe(true);
+    el.remove();
+  });
+
+  it("markSaveFailed shows the error and leaves rows exactly as they were (nothing discarded)", () => {
+    const el = document.createElement("skye-lookup-table") as LookupTableEl;
+    el.tableConfig = table;
+    el.value = [{ id: "row-1", values: { guestName: "Alex" } }]; // seeded/saved baseline
+    document.body.appendChild(el);
+
+    // An actual edit since the last save, so this is genuinely the "save failed, edit survives" case.
+    const input = el.querySelector("input") as HTMLInputElement;
+    input.value = "Alexandra";
+    input.dispatchEvent(new Event("input"));
+    expect(el.dirty).toBe(true);
+
+    el.markSaveFailed("Couldn't save these rows — try again.");
+
+    expect(el.value).toEqual([{ id: "row-1", values: { guestName: "Alexandra" } }]);
+    expect(el.dirty).toBe(true); // still unsaved — the failure didn't silently mark it clean
+    expect(el.querySelector(".skye-lookup-table__status")?.textContent).toBe("Couldn't save these rows — try again.");
+    el.remove();
+  });
+
+  it("readonly suppresses Add row / Remove / Save rows entirely and renders plain text cells", () => {
+    const el = document.createElement("skye-lookup-table") as LookupTableEl;
+    el.tableConfig = table;
+    el.value = [{ id: "row-1", values: { guestName: "Alex" } }];
+    el.setAttribute("readonly", "");
+    document.body.appendChild(el);
+
+    expect(el.querySelectorAll("button")).toHaveLength(0);
+    expect(el.querySelector("input")).toBeNull();
+    expect(el.querySelector("tbody tr td")?.textContent).toBe("Alex");
     el.remove();
   });
 });

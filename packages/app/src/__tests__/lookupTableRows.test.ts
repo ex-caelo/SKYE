@@ -15,10 +15,10 @@ const table: LookupTable = {
 };
 
 describe("writeLookupTableRows", () => {
-  it("creates a new row with the parentReference lookupId field set to the primary item's id", async () => {
+  it("creates a new row with the parentReference lookupId field set to the primary item's id, and returns it with its real server-assigned id", async () => {
     const graph = new MockGraphClient();
     const listId = "related-list-create-test";
-    await writeLookupTableRows(graph, "site1", { ...table, relatedList: { id: listId } }, "42", [
+    const written = await writeLookupTableRows(graph, "site1", { ...table, relatedList: { id: listId } }, "42", [
       { values: { guestName: "Alex", mealChoice: "veggie" } },
     ]);
 
@@ -29,25 +29,31 @@ describe("writeLookupTableRows", () => {
       Favourite_x0020_Campus: "veggie",
       Correlated_x0020_EventLookupId: "42",
     });
+    // Real id attached — without this, saving these same rows again (another writeLookupTableRows
+    // call, or the lookupTable control's own "Save rows" button) would see an id-less row and
+    // create a duplicate instead of updating the one just created.
+    expect(written).toEqual([{ id: page.items[0].id, values: { guestName: "Alex", mealChoice: "veggie" } }]);
   });
 
-  it("updates an existing row when the row has an id", async () => {
+  it("updates an existing row when the row has an id, and returns it unchanged", async () => {
     const graph = new MockGraphClient();
     const listId = "related-list-update-test";
     const created = await graph.createListItem("site1", listId, { Title: "Original Name" });
-    await writeLookupTableRows(graph, "site1", { ...table, relatedList: { id: listId } }, "42", [
-      { id: created.id, values: { guestName: "Updated Name" } },
-    ]);
+    const row = { id: created.id, values: { guestName: "Updated Name" } };
+    const written = await writeLookupTableRows(graph, "site1", { ...table, relatedList: { id: listId } }, "42", [row]);
     const updated = await graph.getListItem("site1", listId, created.id);
     expect(updated.fields.Title).toBe("Updated Name");
     expect(updated.fields.Correlated_x0020_EventLookupId).toBe("42");
+    expect(written).toEqual([row]);
   });
 
   it("does nothing for lookupColumn linkMode (relationship lives on the primary item's own field)", async () => {
     const graph = new MockGraphClient();
     const listId = "related-list-lookupcolumn-test";
     const lookupColumnTable: LookupTable = { ...table, relatedList: { id: listId }, linkMode: "lookupColumn", parentReferenceColumn: undefined };
-    await expect(writeLookupTableRows(graph, "site1", lookupColumnTable, "42", [{ values: { guestName: "Should not write" } }])).resolves.toBeUndefined();
+    const rows = [{ values: { guestName: "Should not write" } }];
+    // Rows come back untouched (not []) — see writeLookupTableRows's own doc comment on why.
+    await expect(writeLookupTableRows(graph, "site1", lookupColumnTable, "42", rows)).resolves.toEqual(rows);
     const page = await graph.searchListItems("site1", listId, {});
     expect(page.items).toHaveLength(0);
   });
@@ -57,17 +63,20 @@ describe("writeLookupTableRows", () => {
     const listId = "related-list-delete-test";
     const created = await graph.createListItem("site1", listId, { Title: "To be deleted" });
 
-    await writeLookupTableRows(graph, "site1", { ...table, relatedList: { id: listId } }, "42", [{ id: created.id, values: {}, deleted: true }]);
+    const written = await writeLookupTableRows(graph, "site1", { ...table, relatedList: { id: listId } }, "42", [
+      { id: created.id, values: {}, deleted: true },
+    ]);
 
     const page = await graph.searchListItems("site1", listId, {});
     expect(page.items).toHaveLength(0);
+    expect(written).toEqual([]); // dropped from the returned list, same as a never-saved deleted row
   });
 
   it("does nothing for a deleted row with no id (never saved server-side in the first place)", async () => {
     const graph = new MockGraphClient();
     const listId = "related-list-delete-unsaved-test";
 
-    await expect(writeLookupTableRows(graph, "site1", { ...table, relatedList: { id: listId } }, "42", [{ values: {}, deleted: true }])).resolves.toBeUndefined();
+    await expect(writeLookupTableRows(graph, "site1", { ...table, relatedList: { id: listId } }, "42", [{ values: {}, deleted: true }])).resolves.toEqual([]);
     const page = await graph.searchListItems("site1", listId, {});
     expect(page.items).toHaveLength(0);
   });

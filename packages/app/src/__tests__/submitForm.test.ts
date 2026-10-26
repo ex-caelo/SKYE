@@ -67,6 +67,48 @@ describe("submitForm", () => {
     vi.unstubAllGlobals();
   });
 
+  it("writes lookupTable rows after the primary item write and returns them (with real ids) in result.lookupTableRows", async () => {
+    const config: FormConfig = {
+      ...baseConfig,
+      fields: {
+        ...baseConfig.fields,
+        purchaseTable: {
+          page: "p1",
+          source: "virtual",
+          controlType: "lookupTable",
+          table: {
+            relatedList: { id: "related-purchases" },
+            linkMode: "parentReference",
+            parentReferenceColumn: "Event",
+            columns: { itemTitle: { source: "sharepoint", bindTo: "Title", controlType: "text" } },
+          },
+        },
+      },
+    };
+    const graph = new MockGraphClient();
+    const callbacks = stubCallbacks();
+
+    const result = await submitForm({
+      config,
+      values: { name: "Jane Doe", agreeToTerms: true, purchaseTable: [{ values: { itemTitle: "Soccer balls" } }] },
+      siteId: "site1",
+      mode: "create",
+      graph,
+      graphFetch: vi.fn(),
+      callbacks,
+    });
+
+    expect(result.success).toBe(true);
+    // A real id is attached (see lookupTableRows.ts's own doc comment on why this matters) — not
+    // just "a row was written", so a caller (the lookupTable control, via markSaved) can tell a
+    // later save to UPDATE this row instead of creating a duplicate.
+    expect(result.lookupTableRows?.purchaseTable).toEqual([{ id: expect.any(String), values: { itemTitle: "Soccer balls" } }]);
+
+    const page = await graph.searchListItems("site1", "related-purchases", {});
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0].fields).toEqual({ Title: "Soccer balls", EventLookupId: result.item?.id });
+  });
+
   it("aborts before writing anything if a beforeSubmit action fails", async () => {
     const graph = new MockGraphClient();
     const createSpy = vi.spyOn(graph, "createListItem");

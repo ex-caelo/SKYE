@@ -577,6 +577,26 @@ input[type="checkbox"].skye-switch:checked::before {
 	border-radius: 0;
 }
 
+.skye-lookup-table__controls {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	flex-wrap: wrap;
+}
+
+.skye-lookup-table__unsaved-note {
+	font-size: 0.85em;
+	color: #b45309;
+}
+
+.skye-lookup-table__status {
+	display: block;
+	margin-top: 0.25rem;
+}
+.skye-lookup-table__status[data-level="error"] {
+	color: var(--danger);
+}
+
 .skye-richtext__toolbar-placeholder {
 	display: flex;
 	gap: 0.4rem;

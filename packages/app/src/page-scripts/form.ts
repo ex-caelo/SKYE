@@ -10,6 +10,7 @@ import { populateChoiceOptionsFromColumns } from "../features/form/render/popula
 import { backfillFieldLabels } from "../features/form/render/fieldLabels.js";
 import { registerElements } from "../features/form/registerElements.js";
 import { submitForm } from "../features/form/submit/submitForm.js";
+import { writeLookupTableRows, type LookupTableRow } from "../features/form/submit/lookupTableRows.js";
 import { runButtonActions } from "../features/form/submit/runButtonActions.js";
 import { checkPersonFieldsResolve } from "../features/form/submit/checkPersonFields.js";
 import { scriptActions } from "../integrations/registry.js";
@@ -317,6 +318,49 @@ async function main() {
     (e.target as unknown as { setResults: (r: unknown[]) => void }).setResults(results);
   });
 
+  // A lookupTable field's own "Save rows" button (see SkyeLookupTable's own doc comment for the
+  // real bug this covers: a controlType "button" action chain like the Luddy admin form's
+  // "Approve Event" never writes these rows, only the whole-form Submit does — so a user about to
+  // click something OTHER than Submit can save the table explicitly first instead of silently
+  // losing it). writeLookupTableRows needs the primary item's real id, which only exists once
+  // this item has actually been created — not yet true for a brand-new, never-submitted item.
+  rendered.root.addEventListener("skye-lookup-table-save", async (e) => {
+    const control = e.target as unknown as { markSaveFailed: (message: string) => void };
+    const { fieldKey } = (e as CustomEvent<{ fieldKey?: string }>).detail;
+    if (!fieldKey) return;
+    const field = merged.fields[fieldKey];
+    if (!field?.table) return;
+    const table = field.table;
+
+    if (!route.itemId) {
+      control.markSaveFailed("Submit the whole form first — rows can't be saved on their own until this item exists.");
+      return;
+    }
+
+    try {
+      const rows = (rendered.getValues()[fieldKey] as LookupTableRow[] | undefined) ?? [];
+      const written = await writeLookupTableRows(graph, route.siteId, table, route.itemId, rows);
+      rendered.markLookupTableSaved(fieldKey, written);
+    } catch (err) {
+      console.error(`entry-form: "Save rows" failed for lookupTable field "${fieldKey}".`, err);
+      control.markSaveFailed("Couldn't save these rows — try again, or submit the whole form.");
+    }
+  });
+
+  // Standard "you have unsaved changes" browser prompt — scoped to lookupTable rows specifically,
+  // the one kind of edit in this app that a controlType "button" action chain (e.g. Approve
+  // Event) can silently discard without ever attempting to save it or reporting an error. Native
+  // `beforeunload` fires for a real navigation away from this page (closing the tab, the
+  // browser's own back/forward, an address-bar entry, or a cross-page `<a>` click like the
+  // "Back"/"Edit Form in Builder" nav links — both separate pages) but NOT for this app's own
+  // same-page hash/state changes (switching the Basics/Metrics/Purchases/Approval tabs), so this
+  // only ever interrupts a genuine "about to leave" moment, never ordinary in-form navigation.
+  window.addEventListener("beforeunload", (e) => {
+    if (!rendered.hasDirtyLookupTables()) return;
+    e.preventDefault();
+    e.returnValue = "";
+  });
+
   const statusEl = el<HTMLElement>(screen, "status");
 
   // Replaces the form with the confirmation splash (screen-submitted in form.astro) once a
@@ -587,6 +631,15 @@ async function main() {
           scriptActions,
         },
       });
+
+      // A full submit's own writeLookupTableRows call (submitForm.ts) is just as real a save as
+      // the table's own "Save rows" button — mark every lookupTable control clean with the
+      // confirmed post-write rows (real ids on created rows) so neither the beforeunload guard
+      // nor a later "Save rows" click/re-submit treats already-saved rows as still unsaved or
+      // tries to re-create them.
+      for (const [fieldKey, rows] of Object.entries(result.lookupTableRows ?? {})) {
+        rendered.markLookupTableSaved(fieldKey, rows);
+      }
 
       if (result.conflict) {
         // Distinct from a generic failure — see submitForm.ts's EtagConflictError handling.

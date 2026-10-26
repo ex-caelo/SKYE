@@ -33,6 +33,15 @@ export interface SubmitResult {
   /** Per-field-key messages for values that couldn't be fully encoded for SharePoint (e.g. a picked person who isn't a site user) — the item is still saved, that field left blank. */
   fieldErrors?: Record<string, string>;
   item?: { id: string; fields: Record<string, unknown> };
+  /**
+   * Every `lookupTable` field's post-write row list, keyed by field key — the exact
+   * `LookupTableRow[]` `writeLookupTableRows` returned (real ids attached to newly-created rows,
+   * deleted rows dropped). The caller should feed this back into that field's own control (see
+   * `SkyeLookupTable.markSaved`) so a later save of the SAME rows updates them instead of
+   * re-creating duplicates, and so the control's own "unsaved changes" tracking knows this
+   * submit already persisted them.
+   */
+  lookupTableRows?: Record<string, LookupTableRow[]>;
   beforeSubmit: TriggerPhaseResult;
   afterSubmit?: TriggerPhaseResult;
   onSuccess?: TriggerPhaseResult;
@@ -125,11 +134,12 @@ export async function submitForm(params: SubmitParams): Promise<SubmitResult> {
   const itemForTemplates = { id: item.id, ...item.fields };
 
   // --- lookupTable row writes (parentReference mode only; needs item.id, hence after the write above) ---
+  const lookupTableRows: Record<string, LookupTableRow[]> = {};
   for (const [fieldKey, field] of Object.entries(config.fields)) {
     if (field.controlType !== "lookupTable" || !field.table) continue;
     const rows = (values[fieldKey] as LookupTableRow[] | undefined) ?? [];
     try {
-      await writeLookupTableRows(graph, siteId, field.table, item.id, rows);
+      lookupTableRows[fieldKey] = await writeLookupTableRows(graph, siteId, field.table, item.id, rows);
     } catch (err) {
       // A row-write failure doesn't unwind the primary item write (see docstring); surfaced loudly, submission continues.
       console.error(`submitForm: lookupTable row write failed for field "${fieldKey}".`, err);
@@ -141,11 +151,11 @@ export async function submitForm(params: SubmitParams): Promise<SubmitResult> {
   const uploadErrorsIfAny = Object.keys(fileUploadErrors).length > 0 ? fileUploadErrors : undefined;
   if (Object.keys(afterSubmit.errors).length > 0) {
     const onError = await runPhase("onError", { ...beforeSubmit.results, ...afterSubmit.results }, itemForTemplates);
-    return { success: true, item: { id: item.id, fields: item.fields }, fileUploadErrors: uploadErrorsIfAny, fieldErrors: fieldErrorsIfAny, beforeSubmit, afterSubmit, onError };
+    return { success: true, item: { id: item.id, fields: item.fields }, lookupTableRows, fileUploadErrors: uploadErrorsIfAny, fieldErrors: fieldErrorsIfAny, beforeSubmit, afterSubmit, onError };
   }
 
   // --- onSuccess ---
   const onSuccess = await runPhase("onSuccess", { ...beforeSubmit.results, ...afterSubmit.results }, itemForTemplates);
 
-  return { success: true, item: { id: item.id, fields: item.fields }, fileUploadErrors: uploadErrorsIfAny, fieldErrors: fieldErrorsIfAny, beforeSubmit, afterSubmit, onSuccess };
+  return { success: true, item: { id: item.id, fields: item.fields }, lookupTableRows, fileUploadErrors: uploadErrorsIfAny, fieldErrors: fieldErrorsIfAny, beforeSubmit, afterSubmit, onSuccess };
 }

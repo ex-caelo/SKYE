@@ -172,7 +172,7 @@ describe("createViewApi dispatch", () => {
   it("skye:navigate resolves the policy and invokes the host navigate callback", async () => {
     const { api, navigate } = makeApi();
     const res = await api.handle("skye:navigate", { target: { view: "calendar" } });
-    expect(navigate).toHaveBeenCalledWith({ kind: "internal", url: "/view?siteId=s1&applicationId=a1#calendar" });
+    expect(navigate).toHaveBeenCalledWith({ kind: "internal", url: "/view?siteId=s1&applicationId=a1#calendar", openInNewTab: false });
     expect(res).toEqual({ ok: true, kind: "internal" });
   });
 

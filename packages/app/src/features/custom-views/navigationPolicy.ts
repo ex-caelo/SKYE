@@ -5,19 +5,33 @@
 //
 // Rules (TODO §16, decisions B + C):
 //   - internal SKYE view/form by id, same site only  -> host navigates its
-//     own window; safe by construction.
+//     own window; safe by construction. Replaces the current page unless
+//     the target sets `newTab: true` (see openInNewTab below), e.g. for a
+//     Cmd/Ctrl+click or middle-click a view wants to honor itself.
 //   - external URL -> allowed ONLY if its exact origin is in the site
 //     config's navigation.allowedExternalOrigins, and then opened in a new
 //     tab with noopener,noreferrer so the SKYE app is never navigated away.
 //   - anything else -> rejected with a stable code.
+//
+// A view can never get a real "open in new tab" from a native <a href> or
+// window.open() of its own — without allow-popups, the browser blocks that
+// regardless of how it's triggered (a click, Cmd/Ctrl+click, or the
+// browser's own right-click "open in new tab" menu item, which also needs
+// a real href the sandboxed frame can't safely be given — see
+// viewHost.ts's "view navigated itself away" teardown for what happens if
+// the frame tries to navigate on its own instead). `newTab` on an internal
+// target is the mediated substitute: the VIEW decides (by inspecting the
+// click event itself) that the gesture looked like "open in new tab", and
+// asks the HOST to actually do it via window.open(), the same safe path
+// an external URL already uses.
 
 import { buildFormUrl, buildViewUrl } from "../../shared/routing.js";
 import type { FormMode } from "../../shared/routing.js";
 
 /** A view's requested navigation. Exactly one of `view` / `form` / `url`. */
 export type NavigationTarget =
-  | { view: string; params?: Record<string, string | number | boolean> }
-  | { form: string; itemId?: string; mode?: "edit" | "view"; params?: Record<string, string | number | boolean> }
+  | { view: string; params?: Record<string, string | number | boolean>; newTab?: boolean }
+  | { form: string; itemId?: string; mode?: "edit" | "view"; params?: Record<string, string | number | boolean>; newTab?: boolean }
   | { url: string };
 
 /** The site/app context the host builds internal URLs from. */
@@ -28,10 +42,17 @@ export interface NavigationContext {
   allowedExternalOrigins: string[];
 }
 
-/** What the host should do with a resolved navigation. */
+/**
+ * What the host should do with a resolved navigation. `openInNewTab` is how a view asks for a
+ * second gesture (Cmd/Ctrl+click, middle-click) on an internal target to behave like a real link
+ * — see this file's own top-of-file comment on why that can't just be a real `<a href>` inside the
+ * sandbox. Always true for `external` (unconditional today, same as before this field existed);
+ * for `internal` it reflects whether the view's own target asked for it (defaults to false, i.e.
+ * the existing "replace the current page" behavior).
+ */
 export type NavigationDecision =
-  | { kind: "internal"; url: string }
-  | { kind: "external"; url: string };
+  | { kind: "internal"; url: string; openInNewTab: boolean }
+  | { kind: "external"; url: string; openInNewTab: true };
 
 /** Thrown for a disallowed / malformed navigation. `code` is stable for the runtime and tests. */
 export class NavigationError extends Error {
@@ -60,7 +81,7 @@ export function resolveNavigation(target: unknown, ctx: NavigationContext): Navi
     }
     // `params` are accepted for forward-compat but not yet encoded into the URL —
     // per-view state in the URL is out of scope for this pass (CUSTOM-VIEWS-SPEC.md §5).
-    return { kind: "internal", url: buildViewUrl(ctx.siteId, ctx.applicationId, ctx.tenantId, t.view) };
+    return { kind: "internal", url: buildViewUrl(ctx.siteId, ctx.applicationId, ctx.tenantId, t.view), openInNewTab: t.newTab === true };
   }
 
   // --- internal: a form on the same site ---
@@ -79,7 +100,7 @@ export function resolveNavigation(target: unknown, ctx: NavigationContext): Navi
     } else if (t.mode !== undefined) {
       throw new NavigationError("mode needs an itemId to go with it");
     }
-    return { kind: "internal", url: buildFormUrl(ctx.siteId, ctx.applicationId, ctx.tenantId, t.form, mode, itemId) };
+    return { kind: "internal", url: buildFormUrl(ctx.siteId, ctx.applicationId, ctx.tenantId, t.form, mode, itemId), openInNewTab: t.newTab === true };
   }
 
   // --- external: only an allowlisted origin, opened in a new tab ---
@@ -97,7 +118,7 @@ export function resolveNavigation(target: unknown, ctx: NavigationContext): Navi
     if (!ctx.allowedExternalOrigins.includes(parsed.origin)) {
       throw new NavigationError(`external navigation to ${parsed.origin} is not on this site's allowlist`);
     }
-    return { kind: "external", url: parsed.toString() };
+    return { kind: "external", url: parsed.toString(), openInNewTab: true };
   }
 
   throw new NavigationError("target must have one of: view, form, url");

@@ -95,11 +95,14 @@ export async function mountView(opts: MountViewOptions): Promise<MountedView> {
     siteConfig,
     ctx,
     navigate: (decision: NavigationDecision) => {
-      if (decision.kind === "internal") {
-        window.location.assign(decision.url);
-      } else {
+      // Always true for "external" (see navigationPolicy.ts); for "internal" it's whatever the
+      // view's own target asked for (its own Cmd/Ctrl+click / middle-click detection — see that
+      // file's own top-of-file comment on why a real <a href> can't do this inside the sandbox).
+      if (decision.openInNewTab) {
         // New tab, fully severed from this page — the SKYE app is never navigated away.
         window.open(decision.url, "_blank", "noopener,noreferrer");
+      } else {
+        window.location.assign(decision.url);
       }
     },
     // Runs entirely in this TRUSTED top page, never in the sandboxed frame — a plain Blob + <a

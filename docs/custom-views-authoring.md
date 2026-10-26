@@ -163,10 +163,29 @@ skye.navigate({ form: "event-signup", itemId: "42", mode: "view" });
 skye.navigate({ url: "https://intranet.example.org/x" }); // external
 ```
 
-Internal targets navigate the SKYE page. An **external** URL only works if
-its exact origin (`https://host[:port]`) is listed in the site's
-`skye.config.json` → `navigation.allowedExternalOrigins`, and it opens in
-a new tab. Anything else throws `navBlocked`.
+Internal (`view`/`form`) targets navigate the SKYE page in place — the
+current page is replaced, same as a normal link click. An **external**
+URL only works if its exact origin (`https://host[:port]`) is listed in
+the site's `skye.config.json` → `navigation.allowedExternalOrigins`, and
+it always opens in a new tab. Anything else throws `navBlocked`.
+
+**Opening an internal target in a new tab instead** (e.g. so a
+Cmd/Ctrl+click or middle-click on your own clickable element behaves like
+a real link): add `newTab: true` to a `view`/`form` target.
+`skye.navigate` has no way to give you a real `<a href>` for this — the
+sandbox never grants the browser permission a link's native "open in new
+tab" needs, regardless of how it's triggered (a click, a modifier key, or
+the browser's own right-click menu) — so detect the gesture yourself in
+your own click handler and ask for it explicitly:
+
+```js
+button.addEventListener("click", (e) => {
+  skye.navigate({ form: "event-signup", itemId: id, newTab: e.metaKey || e.ctrlKey });
+});
+button.addEventListener("auxclick", (e) => {
+  if (e.button === 1) skye.navigate({ form: "event-signup", itemId: id, newTab: true }); // middle-click
+});
+```
 
 ### `skye.report(label, verdict, ok)`
 Only used by the `security-probes` demo view. Ignore it.

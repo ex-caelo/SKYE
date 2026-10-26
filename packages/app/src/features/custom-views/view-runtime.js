@@ -180,9 +180,13 @@
     download: (name, id, field, filename) => call("skye:download", { name, id, field, filename }),
 
     // Host-mediated navigation. target is exactly one of:
-    //   { view: "<id>", params? }              -> another view on this site
-    //   { form: "<id>", itemId?, mode?, params? } -> a form on this site
-    //   { url: "https://..." }                 -> external, only if allowlisted; opens a new tab
+    //   { view: "<id>", params?, newTab? }              -> another view on this site
+    //   { form: "<id>", itemId?, mode?, params?, newTab? } -> a form on this site
+    //   { url: "https://..." }                 -> external, only if allowlisted; always opens a new tab
+    // `newTab` (view/form only, default false) opens in a new tab instead of replacing the current
+    // page — set it when you've detected a Cmd/Ctrl+click or middle-click on your own clickable
+    // element and want it to behave like a real link would (a view can't just render a real <a
+    // href> for this — see navigationPolicy.ts for why).
     navigate: (target) => call("skye:navigate", { target }),
 
     // demo only: probe results must be recorded outside the frame, because

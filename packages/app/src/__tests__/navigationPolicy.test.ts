@@ -9,16 +9,25 @@ const ctx = {
 };
 
 describe("resolveNavigation", () => {
-  it("builds a same-site /view URL for a view target", () => {
+  it("builds a same-site /view URL for a view target, defaulting to NOT opening in a new tab", () => {
     const d = resolveNavigation({ view: "calendar" }, ctx);
-    expect(d).toEqual({ kind: "internal", url: "/view?siteId=site-1&applicationId=app-1#calendar" });
+    expect(d).toEqual({ kind: "internal", url: "/view?siteId=site-1&applicationId=app-1#calendar", openInNewTab: false });
   });
 
   it("builds a /form create URL for a bare form target", () => {
     expect(resolveNavigation({ form: "event-signup" }, ctx)).toEqual({
       kind: "internal",
       url: "/form?siteId=site-1&applicationId=app-1#event-signup/new",
+      openInNewTab: false,
     });
+  });
+
+  it("honors newTab: true on an internal view/form target", () => {
+    expect(resolveNavigation({ view: "calendar", newTab: true }, ctx).openInNewTab).toBe(true);
+    expect(resolveNavigation({ form: "event-signup", itemId: "42", newTab: true }, ctx).openInNewTab).toBe(true);
+    // Anything other than a literal `true` stays the safe default — no surprise new tabs from a
+    // truthy-but-not-boolean value a view might accidentally pass.
+    expect(resolveNavigation({ view: "calendar", newTab: "yes" }, ctx).openInNewTab).toBe(false);
   });
 
   it("builds edit / view mode form URLs when an itemId is given", () => {
@@ -43,10 +52,11 @@ describe("resolveNavigation", () => {
     expect(() => resolveNavigation({ form: "ok", itemId: "1 or 1" }, ctx)).toThrow(NavigationError);
   });
 
-  it("allows an external URL only when its exact origin is on the allowlist", () => {
+  it("allows an external URL only when its exact origin is on the allowlist, and always opens it in a new tab", () => {
     expect(resolveNavigation({ url: "https://intranet.example.org/wiki/x" }, ctx)).toEqual({
       kind: "external",
       url: "https://intranet.example.org/wiki/x",
+      openInNewTab: true,
     });
   });
 
